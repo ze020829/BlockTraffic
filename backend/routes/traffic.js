@@ -65,28 +65,28 @@ router.post('/upload', upload.single('image'), async (req, res) => {
   }
 })
 
-// 存储上传的路况信息
-const trafficReports = []
+// 存储路况信息的 IPFS CID
+let trafficCID = null
 
-// 提交路况信息
-router.post('/', (req, res) => {
-  const trafficInfo = {
-    id: Date.now(),
-    ...req.body,
-    status: 'pending',
-    verifications: 0,
-    verifiedBy: [],
-    createdAt: new Date(),
-    imageUrl: req.body.imageUrl,
-    location: req.body.location, // 地点名称
-    coordinates: req.body.coordinates // [经度, 纬度]
+// 从 IPFS 获取所有路况数据
+async function getAllReports() {
+  if (!trafficCID) return []
+  const chunks = []
+  for await (const chunk of ipfs.cat(trafficCID)) {
+    chunks.push(chunk)
   }
-  trafficReports.push(trafficInfo)
-  res.json(trafficInfo)
-})
+  return JSON.parse(Buffer.concat(chunks).toString())
+}
+
+// 更新 IPFS 中的路况数据
+async function updateReports(reports) {
+  const { cid } = await ipfs.add(JSON.stringify(reports))
+  trafficCID = cid.toString()
+  return reports
+}
 
 // 获取周边路况（1公里范围内）
-router.get('/nearby', (req, res) => {
+router.get('/nearby', async (req, res) => {
   const { lat, lng } = req.query
   
   if (!lat || !lng) {
@@ -96,52 +96,117 @@ router.get('/nearby', (req, res) => {
   const userLat = parseFloat(lat)
   const userLng = parseFloat(lng)
 
-  const nearbyReports = trafficReports.filter(report => {
-    // 只返回已验证的路况
-    if (report.status !== 'verified') return false
+  try {
+    // 从 IPFS 获取所有路况数据
+    if (!trafficCID) {
+      return res.status(404).json({ error: '尚未存储任何路况数据' });
+    }
     
-    // 计算距离
-    const [reportLng, reportLat] = report.coordinates
-    const distance = calculateDistance(userLat, userLng, reportLat, reportLng)
+    const chunks = [];
+    try {
+      for await (const chunk of ipfs.cat(trafficCID)) {
+        chunks.push(chunk);
+      }
+    } catch (error) {
+      console.error('IPFS数据获取失败:', error);
+      return res.status(500).json({ error: '无法从IPFS获取路况数据' });
+    }
     
-    // 返回1公里范围内的路况
-    return distance <= 1000
-  })
+    const allReports = chunks.length > 0 
+      ? JSON.parse(Buffer.concat(chunks).toString())
+      : [];
 
-  res.json(nearbyReports)
+    // 过滤1公里范围内的路况
+    const nearbyReports = allReports.filter(report => {
+      // 只返回已验证的路况
+      if (report.status !== 'verified') return false
+      
+      // 计算距离
+      const [reportLng, reportLat] = report.coordinates
+      const distance = calculateDistance(userLat, userLng, reportLat, reportLng)
+      
+      // 返回1公里范围内的路况
+      return distance <= 1000
+    })
+
+    res.json(nearbyReports)
+  } catch (error) {
+    console.error('从 IPFS 获取路况数据失败:', error)
+    res.status(500).json({ error: '获取路况数据失败' })
+  }
+})
+
+// 提交路况信息
+router.post('/', async (req, res) => {
+  try {
+    const trafficInfo = {
+      id: Date.now(),
+      ...req.body,
+      status: 'pending',
+      verifications: 0,
+      verifiedBy: [],
+      createdAt: new Date(),
+      imageUrl: req.body.imageUrl,
+      location: req.body.location, // 地点名称
+      coordinates: req.body.coordinates // [经度, 纬度]
+    }
+
+    const existingReports = await getAllReports()
+    const updatedReports = await updateReports([...existingReports, trafficInfo])
+    
+    res.json(trafficInfo)
+  } catch (error) {
+    console.error('提交路况信息失败:', error)
+    res.status(500).json({ error: '提交路况信息失败' })
+  }
 })
 
 // 获取待验证的路况信息
-router.get('/pending', (req, res) => {
-  const pendingReports = trafficReports.filter(
-    report => report.status === 'pending'
-  )
-  res.json(pendingReports)
+router.get('/pending', async (req, res) => {
+  try {
+    const allReports = await getAllReports()
+    const pendingReports = allReports.filter(
+      report => report.status === 'pending'
+    )
+    res.json(pendingReports)
+  } catch (error) {
+    console.error('获取待验证路况失败:', error)
+    res.status(500).json({ error: '获取待验证路况失败' })
+  }
 })
 
 // 验证路况信息
-router.post('/:id/verify', (req, res) => {
-  const { userId } = req.body
-  const report = trafficReports.find(r => r.id === Number(req.params.id))
-  
-  if (!report) {
-    return res.status(404).json({ error: 'Report not found' })
+router.post('/:id/verify', async (req, res) => {
+  try {
+    const { userId } = req.body
+    const allReports = await getAllReports()
+    const report = allReports.find(r => r.id === Number(req.params.id))
+    
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found' })
+    }
+
+    // 防止重复验证
+    if (report.verifiedBy.includes(userId)) {
+      return res.status(400).json({ error: 'Already verified by this user' })
+    }
+
+    report.verifications += 1
+    report.verifiedBy.push(userId)
+
+    // 如果达到5次验证
+    if (report.verifications >= 5) {
+      report.status = 'verified'
+    }
+
+    // 更新 IPFS 中的数据
+    await updateReports(allReports)
+    
+    res.json(report)
+  } catch (error) {
+    console.error('验证路况信息失败:', error)
+    res.status(500).json({ error: '验证路况信息失败' })
   }
-
-  // 防止重复验证
-  if (report.verifiedBy.includes(userId)) {
-    return res.status(400).json({ error: 'Already verified by this user' })
-  }
-
-  report.verifications += 1
-  report.verifiedBy.push(userId)
-
-  // 如果达到5次验证
-  if (report.verifications >= 5) {
-    report.status = 'verified'
-  }
-
-  res.json(report)
 })
 
 export default router

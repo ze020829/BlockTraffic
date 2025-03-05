@@ -92,10 +92,18 @@ export default createStore({
       }
     },
     
-    async verifyTrafficInfo({ commit }, { trafficId, userId }) {
+    async verifyTrafficInfo({ commit, state }, { trafficId }) {
       try {
+        if (!state.userToken) {
+          throw new Error('用户未登录')
+        }
+        
         const { data } = await axios.post(`${API_BASE_URL}/traffic/${trafficId}/verify`, {
-          userId
+          userId: state.userToken
+        }, {
+          headers: {
+            Authorization: `Bearer ${state.userToken}`
+          }
         })
         commit('UPDATE_TRAFFIC', { 
           id: trafficId, 

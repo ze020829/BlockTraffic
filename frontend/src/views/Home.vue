@@ -27,7 +27,7 @@
 
       <!-- 右侧路况列表 -->
       <div class="traffic-list">
-        <h3>周边路况信息</h3>
+        <h3>周边路况信息（1公里范围内）</h3>
         <el-tabs v-model="activeTab">
           <el-tab-pane label="已验证" name="verified">
             <el-scrollbar height="calc(100vh - 180px)">
@@ -45,6 +45,7 @@
                 </template>
                 <p>{{ item.description }}</p>
                 <p class="time">{{ formatTime(item.timestamp) }}</p>
+                <p class="location">{{ item.location }}</p>
               </el-card>
             </el-scrollbar>
           </el-tab-pane>
@@ -67,6 +68,7 @@
                 </template>
                 <p>{{ item.description }}</p>
                 <p class="time">{{ formatTime(item.timestamp) }}</p>
+                <p class="location">{{ item.location }}</p>
                 <div class="verify-action">
                   <el-button 
                     type="primary" 
@@ -140,28 +142,65 @@ const formatTime = (timestamp) => {
   return new Date(timestamp).toLocaleString()
 }
 
+const locationSuccess = (result) => {
+  const userPos = {
+    latitude: result.point.lat,
+    longitude: result.point.lng
+  }
+  center.value = { lng: userPos.longitude, lat: userPos.latitude }
+  store.commit('SET_USER_POSITION', userPos)
+  store.dispatch('getNearbyTrafficInfo')
+  store.dispatch('getPendingVerifications')
+}
+
 const handleMapReady = ({ BMap, map }) => {
+  // 定位成功回调
+  const handleLocationSuccess = (position) => {
+    const userPos = {
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude
+    }
+    center.value = { lng: userPos.longitude, lat: userPos.latitude }
+    store.commit('SET_USER_POSITION', userPos)
+    // 确保用户位置设置后再获取数据
+    Promise.all([
+      store.dispatch('getNearbyTrafficInfo'),
+      store.dispatch('getPendingVerifications')
+    ]).catch(error => {
+      console.error('初始化数据获取失败:', error)
+    })
+  }
+
+  // 先尝试浏览器定位
   navigator.geolocation.getCurrentPosition(
-    (position) => {
-      const userPos = {
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude
-      }
-      center.value = { lng: userPos.longitude, lat: userPos.latitude }
-      store.commit('SET_USER_POSITION', userPos)
-      store.dispatch('getNearbyTrafficInfo')
-      store.dispatch('getPendingVerifications')
-    },
+    handleLocationSuccess,
     (error) => {
-      console.error('定位失败:', error)
-      ElMessage.warning('获取当前位置失败，使用默认位置')
-      const defaultPos = {
-        latitude: 39.915,
-        longitude: 116.404
-      }
-      store.commit('SET_USER_POSITION', defaultPos)
-      store.dispatch('getNearbyTrafficInfo')
-      store.dispatch('getPendingVerifications')
+      console.error('浏览器定位失败:', error)
+      ElMessage.warning('正在尝试百度地图定位...')
+      // 启用百度地图定位
+      const geolocation = new BMap.Geolocation()
+      geolocation.getCurrentPosition(function(r) {
+        if (this.getStatus() === BMAP_STATUS_SUCCESS) {
+          const userPos = {
+            latitude: r.point.lat,
+            longitude: r.point.lng
+          }
+          center.value = { lng: userPos.longitude, lat: userPos.latitude }
+          store.commit('SET_USER_POSITION', userPos)
+          Promise.all([
+            store.dispatch('getNearbyTrafficInfo'),
+            store.dispatch('getPendingVerifications')
+          ])
+        } else {
+          ElMessage.error('定位失败，请手动刷新页面重试')
+          console.error('百度地图定位失败:', this.getStatus())
+        }
+      })
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 5000,
+      maximumAge: 0
     }
   )
 }
@@ -174,12 +213,20 @@ const showTrafficDetail = (traffic) => {
 
 const verifyTraffic = async (trafficId) => {
   try {
-    const userId = store.state.userToken
-    await store.dispatch('verifyTrafficInfo', { trafficId, userId })
+    await store.dispatch('verifyTrafficInfo', { trafficId })
     ElMessage.success('确认成功')
+    // 刷新待验证列表和周边路况
+    // 刷新数据时添加距离参数（1000米）
+    await Promise.all([
+      store.dispatch('getPendingVerifications'),
+      store.dispatch('getNearbyTrafficInfo', { distance: 1000 })
+    ]).catch(error => {
+      console.error('数据刷新失败:', error)
+      ElMessage.error('数据刷新失败，请稍后重试')
+    })
   } catch (error) {
     console.error('确认路况信息失败:', error)
-    ElMessage.error(error.response?.data?.error || '确认失败')
+    ElMessage.error(error.response?.data?.error || error.message || '确认失败')
   }
 }
 
