@@ -1,7 +1,8 @@
-const express = require('express');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-require('dotenv').config();
+import express from 'express';
+import cors from 'cors';
+import bodyParser from 'body-parser';
+import dotenv from 'dotenv';
+dotenv.config();
 
 const app = express();
 
@@ -10,8 +11,8 @@ app.use(cors());
 app.use(bodyParser.json());
 
 // 路由
-const trafficRoutes = require('./routes/traffic');
-const userRoutes = require('./routes/user');
+import trafficRoutes from './routes/traffic.js';
+import userRoutes from './routes/user.js';
 
 app.use('/api/traffic', trafficRoutes);
 app.use('/api/user', userRoutes);
@@ -25,4 +26,4 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-}); 
+});

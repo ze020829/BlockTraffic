@@ -28,28 +28,58 @@
       <!-- 右侧路况列表 -->
       <div class="traffic-list">
         <h3>周边路况信息</h3>
-        <el-scrollbar height="calc(100vh - 120px)">
-          <el-card 
-            v-for="item in trafficInfo" 
-            :key="item.id" 
-            class="traffic-card"
-            @click="showTrafficDetail(item)"
-          >
-            <template #header>
-              <div class="card-header">
-                <span>{{ typeText[item.type] }}</span>
-                <el-tag 
-                  :type="item.status === 'verified' ? 'success' : 'warning'"
-                  size="small"
-                >
-                  {{ item.status === 'verified' ? '已确认' : '待确认' }}
-                </el-tag>
-              </div>
-            </template>
-            <p>{{ item.description }}</p>
-            <p class="time">{{ formatTime(item.timestamp) }}</p>
-          </el-card>
-        </el-scrollbar>
+        <el-tabs v-model="activeTab">
+          <el-tab-pane label="已验证" name="verified">
+            <el-scrollbar height="calc(100vh - 180px)">
+              <el-card 
+                v-for="item in verifiedTraffic" 
+                :key="item.id" 
+                class="traffic-card"
+                @click="showTrafficDetail(item)"
+              >
+                <template #header>
+                  <div class="card-header">
+                    <span>{{ typeText[item.type] }}</span>
+                    <el-tag type="success" size="small">已确认</el-tag>
+                  </div>
+                </template>
+                <p>{{ item.description }}</p>
+                <p class="time">{{ formatTime(item.timestamp) }}</p>
+              </el-card>
+            </el-scrollbar>
+          </el-tab-pane>
+
+          <el-tab-pane label="待验证" name="pending">
+            <el-scrollbar height="calc(100vh - 180px)">
+              <el-card 
+                v-for="item in pendingVerifications" 
+                :key="item.id" 
+                class="traffic-card"
+                @click="showTrafficDetail(item)"
+              >
+                <template #header>
+                  <div class="card-header">
+                    <span>{{ typeText[item.type] }}</span>
+                    <el-tag type="warning" size="small">
+                      待确认 ({{ item.verifications }}/5)
+                    </el-tag>
+                  </div>
+                </template>
+                <p>{{ item.description }}</p>
+                <p class="time">{{ formatTime(item.timestamp) }}</p>
+                <div class="verify-action">
+                  <el-button 
+                    type="primary" 
+                    size="small"
+                    @click.stop="verifyTraffic(item.id)"
+                  >
+                    确认
+                  </el-button>
+                </div>
+              </el-card>
+            </el-scrollbar>
+          </el-tab-pane>
+        </el-tabs>
       </div>
     </div>
 
@@ -75,7 +105,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useStore } from 'vuex'
 import { Location, Plus, User } from '@element-plus/icons-vue'
 import TrafficForm from '../components/TrafficForm.vue'
@@ -91,7 +121,7 @@ const zoom = ref(15)
 const dialogVisible = ref(false)
 const isSubmitting = ref(false)
 const selectedTraffic = ref(null)
-const trafficInfo = ref([])
+const activeTab = ref('verified')
 
 const typeText = {
   congestion: '交通拥堵',
@@ -100,48 +130,40 @@ const typeText = {
   normal: '道路正常'
 }
 
+const trafficInfo = computed(() => store.state.trafficList)
+const pendingVerifications = computed(() => store.state.pendingVerifications)
+const verifiedTraffic = computed(() => 
+  store.state.trafficList.filter(t => t.status === 'verified')
+)
+
 const formatTime = (timestamp) => {
   return new Date(timestamp).toLocaleString()
 }
 
-const handleMenuSelect = (index) => {
-  if (index === '2') {
-    router.push('/submit')
-  } else if (index === '3') {
-    router.push('/profile')
-  }
-}
-
 const handleMapReady = ({ BMap, map }) => {
-  // 先尝试获取用户位置
   navigator.geolocation.getCurrentPosition(
     (position) => {
       const userPos = {
-        lng: position.coords.longitude,
-        lat: position.coords.latitude
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude
       }
-      center.value = userPos
+      center.value = { lng: userPos.longitude, lat: userPos.latitude }
       store.commit('SET_USER_POSITION', userPos)
       store.dispatch('getNearbyTrafficInfo')
+      store.dispatch('getPendingVerifications')
     },
     (error) => {
       console.error('定位失败:', error)
       ElMessage.warning('获取当前位置失败，使用默认位置')
+      const defaultPos = {
+        latitude: 39.915,
+        longitude: 116.404
+      }
+      store.commit('SET_USER_POSITION', defaultPos)
       store.dispatch('getNearbyTrafficInfo')
+      store.dispatch('getPendingVerifications')
     }
   )
-}
-
-const locationSuccess = (e) => {
-  store.commit('SET_USER_POSITION', {
-    lng: e.point.lng,
-    lat: e.point.lat
-  })
-  center.value = {
-    lng: e.point.lng,
-    lat: e.point.lat
-  }
-  store.dispatch('getNearbyTrafficInfo')
 }
 
 const showTrafficDetail = (traffic) => {
@@ -150,38 +172,29 @@ const showTrafficDetail = (traffic) => {
   dialogVisible.value = true
 }
 
-const submitTrafficInfo = async (data) => {
+const verifyTraffic = async (trafficId) => {
   try {
-    await store.dispatch('submitTrafficInfo', {
-      ...data,
-      position: center.value
-    })
-    dialogVisible.value = false
+    const userId = store.state.userToken
+    await store.dispatch('verifyTrafficInfo', { trafficId, userId })
+    ElMessage.success('确认成功')
   } catch (error) {
-    console.error('提交路况信息失败:', error)
+    console.error('确认路况信息失败:', error)
+    ElMessage.error(error.response?.data?.error || '确认失败')
   }
 }
 
-const verifyTrafficInfo = async (trafficId) => {
-  try {
-    await store.dispatch('verifyTrafficInfo', trafficId)
-    dialogVisible.value = false
-  } catch (error) {
-    console.error('验证路况信息失败:', error)
-  }
-}
-
-const updateTrafficInfo = async (data) => {
-  try {
-    await store.dispatch('updateTrafficInfo', data)
-    dialogVisible.value = false
-  } catch (error) {
-    console.error('更新路况信息失败:', error)
-  }
-}
-
-onMounted(async () => {
-  await store.dispatch('getNearbyTrafficInfo')
+onMounted(() => {
+  // 监听路由变化，当进入首页时刷新数据
+  router.afterEach((to) => {
+    if (to.path === '/') {
+      store.dispatch('getNearbyTrafficInfo')
+      store.dispatch('getPendingVerifications')
+    }
+  })
+  
+  // 初始加载
+  store.dispatch('getNearbyTrafficInfo')
+  store.dispatch('getPendingVerifications')
 })
 </script>
 
@@ -230,4 +243,9 @@ onMounted(async () => {
   color: #999;
   margin-top: 8px;
 }
-</style> 
+
+.verify-action {
+  margin-top: 10px;
+  text-align: right;
+}
+</style>

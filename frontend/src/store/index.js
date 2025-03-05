@@ -3,22 +3,10 @@ import axios from 'axios'
 
 const API_BASE_URL = 'http://localhost:3000/api'
 
-const mockTrafficData = [
-  {
-    id: 1,
-    type: 'congestion',
-    location: '北京市海淀区中关村大街',
-    description: '早高峰拥堵',
-    position: { lng: 116.404, lat: 39.915 },
-    status: 'verified',
-    timestamp: Date.now() - 3600000
-  },
-  // ... 可以添加更多模拟数据
-]
-
 export default createStore({
   state: {
     trafficList: [],
+    pendingVerifications: [], // 待验证的路况信息
     userPosition: null,
     userToken: localStorage.getItem('userToken'),
     userInfo: {
@@ -32,6 +20,9 @@ export default createStore({
   mutations: {
     SET_TRAFFIC_LIST(state, list) {
       state.trafficList = list
+    },
+    SET_PENDING_VERIFICATIONS(state, list) {
+      state.pendingVerifications = list
     },
     SET_USER_POSITION(state, position) {
       state.userPosition = position
@@ -61,12 +52,31 @@ export default createStore({
   },
   
   actions: {
-    async getNearbyTrafficInfo({ commit }) {
+    async getNearbyTrafficInfo({ commit, state }) {
       try {
-        // 暂时使用模拟数据
-        commit('SET_TRAFFIC_LIST', mockTrafficData)
+        if (!state.userPosition) {
+          throw new Error('用户位置未设置')
+        }
+        
+        const { data } = await axios.get(`${API_BASE_URL}/traffic/nearby`, {
+          params: {
+            lat: state.userPosition.latitude,
+            lng: state.userPosition.longitude
+          }
+        })
+        commit('SET_TRAFFIC_LIST', data)
       } catch (error) {
         console.error('获取路况信息失败:', error)
+        throw error
+      }
+    },
+    
+    async getPendingVerifications({ commit }) {
+      try {
+        const { data } = await axios.get(`${API_BASE_URL}/traffic/pending`)
+        commit('SET_PENDING_VERIFICATIONS', data)
+      } catch (error) {
+        console.error('获取待验证信息失败:', error)
         throw error
       }
     },
@@ -82,12 +92,17 @@ export default createStore({
       }
     },
     
-    async verifyTrafficInfo({ commit }, trafficId) {
+    async verifyTrafficInfo({ commit }, { trafficId, userId }) {
       try {
-        const { data } = await axios.post(`${API_BASE_URL}/traffic/${trafficId}/verify`)
+        const { data } = await axios.post(`${API_BASE_URL}/traffic/${trafficId}/verify`, {
+          userId
+        })
         commit('UPDATE_TRAFFIC', { 
           id: trafficId, 
-          data: { verifications: data.verifications }
+          data: { 
+            verifications: data.verifications,
+            verifiedBy: data.verifiedBy
+          }
         })
         return data
       } catch (error) {
@@ -137,4 +152,4 @@ export default createStore({
       }
     }
   }
-}) 
+})

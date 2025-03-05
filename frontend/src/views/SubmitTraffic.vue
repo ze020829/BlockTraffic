@@ -140,6 +140,7 @@ import { Plus } from '@element-plus/icons-vue'
 import { useStore } from 'vuex'
 import { useRouter } from 'vue-router'
 import Layout from '../components/Layout.vue'
+import axios from 'axios'
 
 const store = useStore()
 const router = useRouter()
@@ -337,10 +338,32 @@ const beforeUpload = (file) => {
 }
 
 const uploadImage = async ({ file }) => {
-  form.images.push({
-    name: file.name,
-    url: URL.createObjectURL(file)
-  })
+  try {
+    // 创建 FormData
+    const formData = new FormData()
+    formData.append('image', file)
+    
+    // 发送到后端
+    const { data } = await axios.post('http://localhost:3000/api/traffic/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+    
+    const { url, hash } = data
+    
+    // 添加到表单数据
+    form.images.push({
+      name: file.name,
+      url: url,
+      hash: hash
+    })
+    
+    ElMessage.success('图片上传成功')
+  } catch (error) {
+    console.error('上传失败:', error.message)
+    ElMessage.error(error.response?.data?.error || '图片上传失败')
+  }
 }
 
 const handleExceed = () => {
@@ -360,6 +383,11 @@ const submitForm = async () => {
       try {
         await store.dispatch('submitTrafficInfo', {
           ...form,
+          // 只发送图片的 IPFS hash
+          images: form.images.map(img => ({
+            name: img.name,
+            hash: img.hash
+          })),
           timestamp: Date.now()
         })
         ElMessage.success('提交成功')

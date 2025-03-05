@@ -1,4 +1,4 @@
-const express = require('express')
+import express from 'express'
 const router = express.Router()
 
 // 获取用户信息
@@ -37,4 +37,4 @@ router.get('/verifications', (req, res) => {
   ])
 })
 
-module.exports = router 
+export default router
