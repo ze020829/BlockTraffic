@@ -52,10 +52,31 @@ export default createStore({
   },
   
   actions: {
-    async getNearbyTrafficInfo({ commit, state }) {
+    async getCurrentPosition({ commit }) {
+      try {
+        const position = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 5000,
+            maximumAge: 0
+          });
+        });
+        
+        commit('SET_USER_POSITION', {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude
+        });
+        return position.coords;
+      } catch (error) {
+        console.error('获取位置失败:', error);
+        throw new Error('无法获取您的位置，请检查位置权限设置');
+      }
+    },
+
+    async getNearbyTrafficInfo({ commit, state, dispatch }) {
       try {
         if (!state.userPosition) {
-          throw new Error('用户位置未设置')
+          await dispatch('getCurrentPosition');
         }
         
         const { data } = await axios.get(`${API_BASE_URL}/traffic/nearby`, {

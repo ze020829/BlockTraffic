@@ -2,8 +2,9 @@ import express from 'express'
 const router = express.Router()
 import multer from 'multer'
 import { create } from 'ipfs-http-client'
-import fs from 'fs'
+import { promises as fsp } from 'fs'
 import path from 'path'
+import fs from 'fs'
 
 // 配置文件上传
 const upload = multer({ dest: 'uploads/' })
@@ -65,8 +66,17 @@ router.post('/upload', upload.single('image'), async (req, res) => {
   }
 })
 
-// 存储路况信息的 IPFS CID
+// 存储路况信息的 IPFS CID（持久化存储）
+const CID_FILE = 'traffic_cid.txt'
+
+// 从文件加载CID
 let trafficCID = null
+try {
+  trafficCID = await fsp.readFile(CID_FILE, 'utf-8')
+  console.log(`从存储加载历史路况CID: ${trafficCID}`)
+} catch (error) {
+  console.log('没有找到历史路况数据，将创建新存储')
+}
 
 // 从 IPFS 获取所有路况数据
 async function getAllReports() {
@@ -78,43 +88,50 @@ async function getAllReports() {
   return JSON.parse(Buffer.concat(chunks).toString())
 }
 
-// 更新 IPFS 中的路况数据
+// 更新 IPFS 中的路况数据并持久化CID
 async function updateReports(reports) {
   const { cid } = await ipfs.add(JSON.stringify(reports))
   trafficCID = cid.toString()
+  
+  // 持久化存储CID到文件
+  await fsp.writeFile(CID_FILE, trafficCID)
+  console.log(`已保存最新路况CID到: ${CID_FILE}`)
+  
   return reports
 }
 
 // 获取周边路况（1公里范围内）
 router.get('/nearby', async (req, res) => {
-  const { lat, lng } = req.query
-  
-  if (!lat || !lng) {
-    return res.status(400).json({ error: '需要提供当前位置坐标' })
+  // 验证请求参数
+  const { lat, lng } = req.query;
+  if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
+    return res.status(400).json({ 
+      error: '需要有效的经纬度坐标参数（lat,lng）' 
+    });
   }
 
-  const userLat = parseFloat(lat)
-  const userLng = parseFloat(lng)
+  const userLat = parseFloat(lat);
+  const userLng = parseFloat(lng);
+  console.log(`正在查询周边路况 [${userLat}, ${userLng}]`);
 
   try {
     // 从 IPFS 获取所有路况数据
-    if (!trafficCID) {
-      return res.status(404).json({ error: '尚未存储任何路况数据' });
-    }
-    
-    const chunks = [];
-    try {
-      for await (const chunk of ipfs.cat(trafficCID)) {
-        chunks.push(chunk);
+    let allReports = [];
+    if (trafficCID) {
+      try {
+        const chunks = [];
+        for await (const chunk of ipfs.cat(trafficCID)) {
+          chunks.push(chunk);
+        }
+        allReports = chunks.length > 0 
+          ? JSON.parse(Buffer.concat(chunks).toString())
+          : [];
+      } catch (error) {
+        console.error('IPFS数据获取失败:', error);
+        // 返回缓存数据或空数组
+        allReports = [];
       }
-    } catch (error) {
-      console.error('IPFS数据获取失败:', error);
-      return res.status(500).json({ error: '无法从IPFS获取路况数据' });
     }
-    
-    const allReports = chunks.length > 0 
-      ? JSON.parse(Buffer.concat(chunks).toString())
-      : [];
 
     // 过滤1公里范围内的路况
     const nearbyReports = allReports.filter(report => {
