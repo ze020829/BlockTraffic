@@ -45,7 +45,7 @@
     </el-form-item>
 
     <el-form-item>
-      <el-button type="primary" @click="submitForm">提交</el-button>
+      <el-button type="primary" @click="submitForm">{{ isEditing ? '保存修改' : '提交' }}</el-button>
       <el-button @click="$emit('cancel')">取消</el-button>
     </el-form-item>
   </el-form>
@@ -89,9 +89,16 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
+
+const props = defineProps({
+  initialData: {
+    type: Object,
+    default: null
+  }
+})
 
 const emit = defineEmits(['submit', 'cancel'])
 const formRef = ref(null)
@@ -100,12 +107,32 @@ const mapCenter = ref({ lng: 116.404, lat: 39.915 })
 const selectedLocation = ref(null)
 const userLocation = ref(null)
 
+// 判断是否为编辑模式
+const isEditing = computed(() => !!props.initialData)
+
+// 初始化表单数据
 const form = reactive({
   location: '',
   type: '',
   description: '',
   images: [],
   position: null
+})
+
+// 如果有初始数据，则填充表单
+onMounted(() => {
+  if (props.initialData) {
+    form.location = props.initialData.location || ''
+    form.type = props.initialData.type || ''
+    form.description = props.initialData.description || ''
+    form.images = props.initialData.images || []
+    form.position = props.initialData.position || null
+    
+    if (form.position) {
+      selectedLocation.value = form.position
+      mapCenter.value = form.position
+    }
+  }
 })
 
 const rules = {
@@ -210,10 +237,17 @@ const submitForm = async () => {
         return
       }
       
-      emit('submit', {
+      const submitData = {
         ...form,
         timestamp: Date.now()
-      })
+      }
+      
+      // 如果是编辑模式，保留原始ID
+      if (props.initialData && props.initialData.id) {
+        submitData.id = props.initialData.id
+      }
+      
+      emit('submit', submitData)
     }
   })
 }

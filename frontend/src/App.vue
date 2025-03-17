@@ -3,6 +3,15 @@
 </template>
 
 <script setup>
+import { onMounted } from 'vue'
+import { useStore } from 'vuex'
+
+const store = useStore()
+
+onMounted(() => {
+  // 初始化用户
+  store.dispatch('initializeUser')
+})
 </script>
 
 <style>

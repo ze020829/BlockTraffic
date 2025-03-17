@@ -3,12 +3,39 @@ import axios from 'axios'
 
 const API_BASE_URL = 'http://localhost:3000/api'
 
+// 预定义用户列表
+const predefinedUsers = [
+  {
+    id: 'admin',
+    name: '管理员',
+    role: 'admin',
+    reputation: 95,
+    tokens: 1000
+  },
+  {
+    id: 'user1',
+    name: '普通用户1',
+    role: 'user',
+    reputation: 80,
+    tokens: 100
+  },
+  {
+    id: 'user2',
+    name: '普通用户2',
+    role: 'user',
+    reputation: 70,
+    tokens: 50
+  }
+]
+
 export default createStore({
   state: {
     trafficList: [],
     pendingVerifications: [], // 待验证的路况信息
     userPosition: null,
-    userToken: localStorage.getItem('userToken'),
+    userToken: localStorage.getItem('userToken') || 'admin', // 默认使用管理员登录
+    currentUser: null, // 当前用户对象
+    userList: predefinedUsers, // 用户列表
     userInfo: {
       reputation: 80,
       tokens: 100
@@ -48,10 +75,37 @@ export default createStore({
     UPDATE_USER_STATS(state, { reputation, tokens }) {
       if (reputation) state.userInfo.reputation += reputation
       if (tokens) state.userInfo.tokens += tokens
+    },
+    // 新增：设置当前用户
+    SET_CURRENT_USER(state, userId) {
+      state.userToken = userId
+      localStorage.setItem('userToken', userId)
+      
+      // 根据ID查找用户
+      const user = state.userList.find(u => u.id === userId)
+      if (user) {
+        state.currentUser = user
+        state.userInfo = {
+          reputation: user.reputation,
+          tokens: user.tokens
+        }
+      }
     }
   },
   
   actions: {
+    // 新增：初始化用户
+    initializeUser({ commit, state }) {
+      // 如果有存储的用户令牌，则使用该令牌登录
+      const userId = state.userToken || 'admin'
+      commit('SET_CURRENT_USER', userId)
+    },
+    
+    // 新增：切换用户
+    switchUser({ commit }, userId) {
+      commit('SET_CURRENT_USER', userId)
+    },
+    
     async getCurrentPosition({ commit }) {
       try {
         const position = await new Promise((resolve, reject) => {
@@ -180,5 +234,14 @@ export default createStore({
         throw error
       }
     }
+  },
+  
+  getters: {
+    // 新增：获取当前用户
+    currentUser: state => state.currentUser,
+    // 新增：获取用户列表
+    userList: state => state.userList,
+    // 新增：判断是否为管理员
+    isAdmin: state => state.currentUser?.role === 'admin'
   }
 })

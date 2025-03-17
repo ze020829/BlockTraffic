@@ -10,19 +10,44 @@
             </div>
           </template>
           <div class="stats-content">
-            <div class="stat-item">
-              <h4>信誉度</h4>
-              <el-progress
-                type="dashboard"
-                :percentage="userInfo.reputation"
-                :color="reputationColor"
-              />
+            <!-- 优化用户切换界面 -->
+            <div class="user-switcher">
+              <h4>当前用户</h4>
+              <div class="user-avatar">
+                <el-avatar :size="64" :icon="UserFilled">{{ currentUser?.name?.charAt(0) }}</el-avatar>
+                <div class="user-name">
+                  <span>{{ currentUser?.name }}</span>
+                  <el-tag size="small" :type="currentUser?.role === 'admin' ? 'danger' : 'info'">
+                    {{ currentUser?.role === 'admin' ? '管理员' : '普通用户' }}
+                  </el-tag>
+                </div>
+              </div>
+              
+              <div class="switch-user-section">
+                <h4>切换用户</h4>
+                <el-radio-group v-model="selectedUserId" @change="handleUserChange" class="user-radio-group">
+                  <el-radio-button v-for="user in userList" :key="user.id" :label="user.id" :disabled="user.id === currentUser?.id">
+                    {{ user.name }}
+                  </el-radio-button>
+                </el-radio-group>
+              </div>
             </div>
-            <div class="stat-item">
-              <h4>代币数量</h4>
-              <div class="token-amount">
-                <el-icon><Coin /></el-icon>
-                <span>{{ userInfo.tokens }}</span>
+            
+            <div class="user-stats-container">
+              <div class="stat-item">
+                <h4>信誉度</h4>
+                <el-progress
+                  type="dashboard"
+                  :percentage="userInfo.reputation"
+                  :color="reputationColor"
+                />
+              </div>
+              <div class="stat-item">
+                <h4>代币数量</h4>
+                <div class="token-amount">
+                  <el-icon><Coin /></el-icon>
+                  <span>{{ userInfo.tokens }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -33,7 +58,8 @@
       <div class="history-container">
         <el-tabs v-model="activeTab" class="history-tabs">
           <el-tab-pane label="提交历史" name="submissions">
-            <el-table :data="submissionHistory" style="width: 100%">
+            <el-empty v-if="submissionHistory.length === 0" description="暂无提交历史" />
+            <el-table v-else :data="submissionHistory" style="width: 100%">
               <el-table-column prop="time" label="时间" width="180">
                 <template #default="scope">
                   {{ formatTime(scope.row.timestamp) }}
@@ -63,7 +89,8 @@
           </el-tab-pane>
 
           <el-tab-pane label="确认历史" name="verifications">
-            <el-table :data="verificationHistory" style="width: 100%">
+            <el-empty v-if="verificationHistory.length === 0" description="暂无确认历史" />
+            <el-table v-else :data="verificationHistory" style="width: 100%">
               <el-table-column prop="time" label="时间" width="180">
                 <template #default="scope">
                   {{ formatTime(scope.row.timestamp) }}
@@ -99,14 +126,16 @@
 
 <script setup>
 import Layout from '../components/Layout.vue'
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useStore } from 'vuex'
-import { Coin } from '@element-plus/icons-vue'
+import { Coin, UserFilled } from '@element-plus/icons-vue'
 
 const store = useStore()
 const activeTab = ref('submissions')
+const selectedUserId = ref(store.state.userToken)
 
 const userInfo = computed(() => store.state.userInfo)
+const currentUser = computed(() => store.getters.currentUser)
 
 const typeText = {
   congestion: '交通拥堵',
@@ -123,12 +152,33 @@ const reputationColor = computed(() => {
 })
 
 const formatTime = (timestamp) => {
-  return new Date(timestamp).toLocaleString()
+  const date = new Date(timestamp)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
 // 这些数据应该从 Vuex 获取
 const submissionHistory = computed(() => store.state.submissionHistory)
 const verificationHistory = computed(() => store.state.verificationHistory)
+
+const userList = computed(() => store.state.userList)
+
+const handleUserChange = () => {
+  store.dispatch('switchUser', selectedUserId.value)
+}
+
+// 监听当前用户变化，更新选中的用户ID
+watch(() => store.state.userToken, (newToken) => {
+  selectedUserId.value = newToken
+})
+
+onMounted(() => {
+  // 初始化当前用户
+  store.dispatch('initializeUser')
+  
+  // 获取历史记录
+  store.dispatch('getSubmissionHistory')
+  store.dispatch('getVerificationHistory')
+})
 </script>
 
 <style scoped>
@@ -152,8 +202,50 @@ const verificationHistory = computed(() => store.state.verificationHistory)
 
 .stats-content {
   display: flex;
-  justify-content: space-around;
+  flex-direction: column;
   padding: 20px 0;
+}
+
+.user-switcher {
+  margin: 0 0 20px 0;
+  padding: 15px;
+  background-color: #f5f7fa;
+  border-radius: 8px;
+}
+
+.user-avatar {
+  display: flex;
+  align-items: center;
+  margin: 15px 0;
+}
+
+.user-name {
+  margin-left: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.user-name span {
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.switch-user-section {
+  margin-top: 15px;
+}
+
+.user-radio-group {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.user-stats-container {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 10px;
 }
 
 .stat-item {
@@ -184,5 +276,10 @@ const verificationHistory = computed(() => store.state.verificationHistory)
 
 .decrease {
   color: #F56C6C;
+}
+
+h4 {
+  margin-bottom: 10px;
+  color: #606266;
 }
 </style> 
