@@ -34,14 +34,27 @@
             <div class="page-title">
               {{ pageTitle }}
             </div>
-            <div class="user-info-display" @click="goToProfile">
-              <el-avatar :size="32" :icon="UserFilled">{{ currentUser?.name?.charAt(0) }}</el-avatar>
-              <div class="user-info-text">
-                <span>{{ currentUser?.name }}</span>
-                <el-tag size="small" :type="currentUser?.role === 'admin' ? 'danger' : 'info'">
-                  {{ currentUser?.role === 'admin' ? '管理员' : '普通用户' }}
-                </el-tag>
-              </div>
+            <div class="user-info-display">
+              <el-dropdown trigger="click">
+                <div class="user-info-content">
+                  <el-avatar :size="32" :icon="UserFilled">
+                    {{ currentUser?.id?.charAt(0) || 'U' }}
+                  </el-avatar>
+                  <div class="user-info-text">
+                    <span>{{ currentUser?.id || '游客' }}</span>
+                    <el-tag size="small" :type="currentUser?.role === 'admin' ? 'danger' : 'info'">
+                      {{ currentUser?.role === 'admin' ? '管理员' : '游客' }}
+                    </el-tag>
+                  </div>
+                </div>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item @click="goToProfile">个人中心</el-dropdown-item>
+                    <el-dropdown-item @click="openUserSwitcher">切换用户</el-dropdown-item>
+                    <el-dropdown-item divided @click="handleLogout">退出登录</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </div>
         </el-header>
@@ -51,18 +64,24 @@
         </el-main>
       </el-container>
     </el-container>
+
+    <!-- 用户切换对话框 -->
+    <UserSwitcher ref="userSwitcherRef" />
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useStore } from 'vuex'
 import { Location, Plus, User, UserFilled } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import UserSwitcher from './UserSwitcher.vue'
 
 const route = useRoute()
 const router = useRouter()
 const store = useStore()
+const userSwitcherRef = ref(null)
 
 const activeMenu = computed(() => route.path)
 const currentUser = computed(() => store.getters.currentUser)
@@ -84,6 +103,17 @@ const pageTitle = computed(() => {
 // 点击用户信息跳转到个人中心
 const goToProfile = () => {
   router.push('/profile')
+}
+
+// 打开用户切换对话框
+const openUserSwitcher = () => {
+  userSwitcherRef.value?.open()
+}
+
+// 处理退出登录
+const handleLogout = () => {
+  store.commit('LOGOUT')
+  ElMessage.success('已退出登录')
 }
 </script>
 
@@ -127,7 +157,7 @@ const goToProfile = () => {
   color: #303133;
 }
 
-.user-info-display {
+.user-info-content {
   display: flex;
   align-items: center;
   cursor: pointer;
@@ -136,7 +166,7 @@ const goToProfile = () => {
   transition: background-color 0.3s;
 }
 
-.user-info-display:hover {
+.user-info-content:hover {
   background-color: #f5f7fa;
 }
 
