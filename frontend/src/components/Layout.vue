@@ -42,8 +42,8 @@
                   </el-avatar>
                   <div class="user-info-text">
                     <span>{{ currentUser?.id || '游客' }}</span>
-                    <el-tag size="small" :type="currentUser?.role === 'admin' ? 'danger' : 'info'">
-                      {{ currentUser?.role === 'admin' ? '管理员' : '游客' }}
+                    <el-tag size="small" :type="currentUser?.role === 'admin' ? 'danger' : (isGuest ? 'info' : 'success')">
+                      {{ currentUser?.role === 'admin' ? '管理员' : (isGuest ? '游客' : '普通用户') }}
                     </el-tag>
                   </div>
                 </div>
@@ -85,6 +85,7 @@ const userSwitcherRef = ref(null)
 
 const activeMenu = computed(() => route.path)
 const currentUser = computed(() => store.getters.currentUser)
+const isGuest = computed(() => store.getters.isGuest)
 
 // 根据路由路径设置页面标题
 const pageTitle = computed(() => {

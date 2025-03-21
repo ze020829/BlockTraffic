@@ -45,8 +45,8 @@
                   </el-avatar>
                   <div class="user-name">
                     <span>{{ currentUser?.id || '未知用户' }}</span>
-                    <el-tag size="small" :type="currentUser?.role === 'admin' ? 'danger' : 'info'">
-                      {{ currentUser?.role === 'admin' ? '管理员' : '游客' }}
+                    <el-tag size="small" :type="currentUser?.role === 'admin' ? 'danger' : (isGuest ? 'info' : 'success')">
+                      {{ currentUser?.role === 'admin' ? '管理员' : (isGuest ? '游客' : '普通用户') }}
                     </el-tag>
                   </div>
                 </div>
@@ -210,8 +210,20 @@ const reputationColor = computed(() => {
 })
 
 const formatTime = (timestamp) => {
-  const date = new Date(timestamp)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  if (!timestamp) return '未知时间'
+  
+  try {
+    const date = new Date(timestamp)
+    // 检查日期是否有效
+    if (isNaN(date.getTime())) {
+      console.warn('无效的时间戳:', timestamp)
+      return '未知时间'
+    }
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  } catch (error) {
+    console.error('格式化时间错误:', error)
+    return '未知时间'
+  }
 }
 
 // 这些数据应该从 Vuex 获取

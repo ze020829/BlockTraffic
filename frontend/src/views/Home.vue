@@ -17,7 +17,7 @@
             @locationSuccess="locationSuccess"
           />
           <bm-marker
-            v-for="traffic in trafficInfo"
+            v-for="traffic in trafficInfo.filter(t => t.position)"
             :key="traffic.id"
             :position="traffic.position"
             @click="showTrafficDetail(traffic)"
@@ -49,8 +49,8 @@
                   </div>
                 </template>
                 <p>{{ item.description }}</p>
-                <p class="time">{{ formatTime(item.timestamp) }}</p>
-                <p class="location">{{ item.location }}</p>
+                <p class="time">{{ formatTime(item.timestamp || item.created) }}</p>
+                <p class="location">{{ formatLocation(item.location) }}</p>
                 
                 <!-- 管理员可以直接删除或修改已验证的路况 -->
                 <div class="admin-actions" v-if="isAdmin">
@@ -85,21 +85,29 @@
                   <div class="card-header">
                     <span>{{ typeText[item.type] }}</span>
                     <el-tag type="warning" size="small">
-                      待确认 ({{ item.verifications || 0 }}/5)
+                      待确认 ({{ getVerificationCount(item) }}/5)
                     </el-tag>
                   </div>
                 </template>
                 <p>{{ item.description }}</p>
-                <p class="time">{{ formatTime(item.timestamp) }}</p>
-                <p class="location">{{ item.location }}</p>
+                <p class="time">{{ formatTime(item.timestamp || item.created) }}</p>
+                <p class="location">{{ formatLocation(item.location) }}</p>
                 <div class="verify-action">
                   <el-button 
-                    v-if="canVerifyTraffic"
+                    v-if="canVerifyTraffic && !hasUserVerified(item)"
                     type="primary" 
                     size="small"
                     @click.stop="verifyTraffic(item.id)"
                   >
                     确认
+                  </el-button>
+                  <el-button 
+                    v-else-if="canVerifyTraffic && hasUserVerified(item)"
+                    type="info" 
+                    size="small"
+                    disabled
+                  >
+                    已确认
                   </el-button>
                   <el-button 
                     v-else
@@ -132,6 +140,7 @@
                 <div class="admin-actions">
                   <el-button type="primary" @click="refreshAllData">刷新所有数据</el-button>
                   <el-button type="warning" @click="showSystemSettings">系统设置</el-button>
+                  <el-button type="danger" @click="resetTrafficInfo">重置交通信息</el-button>
                 </div>
                 
                 <div class="admin-stats">
@@ -217,7 +226,7 @@
               <el-table-column prop="name" label="用户名" width="120" />
               <el-table-column prop="role" label="角色" width="100">
                 <template #default="scope">
-                  <el-tag :type="scope.row.role === 'admin' ? 'danger' : 'info'">
+                  <el-tag :type="scope.row.role === 'admin' ? 'danger' : 'success'">
                     {{ scope.row.role === 'admin' ? '管理员' : '普通用户' }}
                   </el-tag>
                 </template>
@@ -381,14 +390,193 @@ const typeText = {
   normal: '道路正常'
 }
 
-const trafficInfo = computed(() => store.state.trafficList)
-const pendingVerifications = computed(() => store.state.pendingVerifications)
+const trafficInfo = computed(() => {
+  // 确保所有交通信息都有位置属性
+  return store.state.trafficList.map(traffic => {
+    // 如果已经有position属性，直接返回
+    if (traffic.position) return traffic;
+    
+    // 创建一个副本以避免修改原始对象
+    const updatedTraffic = {...traffic};
+    
+    // 尝试从location对象提取position信息
+    try {
+      if (traffic.location) {
+        if (traffic.location.coordinates && traffic.location.coordinates.type === 'Point' && 
+            Array.isArray(traffic.location.coordinates.coordinates)) {
+          const [lng, lat] = traffic.location.coordinates.coordinates;
+          updatedTraffic.position = { lng, lat };
+        } else if (traffic.location.lng !== undefined && traffic.location.lat !== undefined) {
+          updatedTraffic.position = { 
+            lng: traffic.location.lng, 
+            lat: traffic.location.lat 
+          };
+        } else {
+          // 默认位置 - 成都
+          updatedTraffic.position = { lng: 104.0668, lat: 30.5728 };
+        }
+      } else {
+        // 默认位置 - 成都
+        updatedTraffic.position = { lng: 104.0668, lat: 30.5728 };
+      }
+    } catch (err) {
+      console.error('处理位置数据时出错:', err);
+      // 出错时使用默认位置
+      updatedTraffic.position = { lng: 104.0668, lat: 30.5728 };
+    }
+    
+    return updatedTraffic;
+  });
+})
+
+const pendingVerifications = computed(() => {
+  // 确保所有待验证的交通信息都有位置属性
+  return store.state.pendingVerifications.map(traffic => {
+    // 如果已经有position属性，直接返回
+    if (traffic.position) return traffic;
+    
+    // 创建一个副本以避免修改原始对象
+    const updatedTraffic = {...traffic};
+    
+    // 尝试从location对象提取position信息
+    try {
+      if (traffic.location) {
+        if (traffic.location.coordinates && traffic.location.coordinates.type === 'Point' && 
+            Array.isArray(traffic.location.coordinates.coordinates)) {
+          const [lng, lat] = traffic.location.coordinates.coordinates;
+          updatedTraffic.position = { lng, lat };
+        } else if (traffic.location.lng !== undefined && traffic.location.lat !== undefined) {
+          updatedTraffic.position = { 
+            lng: traffic.location.lng, 
+            lat: traffic.location.lat 
+          };
+        } else {
+          // 默认位置 - 成都
+          updatedTraffic.position = { lng: 104.0668, lat: 30.5728 };
+        }
+      } else {
+        // 默认位置 - 成都
+        updatedTraffic.position = { lng: 104.0668, lat: 30.5728 };
+      }
+    } catch (err) {
+      console.error('处理待验证位置数据时出错:', err);
+      // 出错时使用默认位置
+      updatedTraffic.position = { lng: 104.0668, lat: 30.5728 };
+    }
+    
+    return updatedTraffic;
+  });
+})
+
 const verifiedTraffic = computed(() => 
   store.state.trafficList.filter(t => t.status === 'verified')
 )
 
 const formatTime = (timestamp) => {
-  return new Date(timestamp).toLocaleString()
+  if (!timestamp) return '未知时间'
+  
+  try {
+    const date = new Date(timestamp)
+    // 检查日期是否有效
+    if (isNaN(date.getTime())) {
+      console.warn('无效的时间戳:', timestamp)
+      return '未知时间'
+    }
+    return date.toLocaleString('zh-CN', { 
+      year: 'numeric', 
+      month: '2-digit', 
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  } catch (error) {
+    console.error('格式化时间错误:', error)
+    return '未知时间'
+  }
+}
+
+// 格式化位置信息函数
+const formatLocation = (location) => {
+  if (!location) return '未知位置'
+  
+  try {
+    // 如果location是字符串，直接返回
+    if (typeof location === 'string') return location
+    
+    // 如果location有name属性，优先使用
+    if (location.name && !location.name.startsWith('位置(') && !location.name.startsWith('成都市位置(')) 
+      return location.name
+    
+    // 如果location有address属性，也可以使用
+    if (location.address && !location.address.startsWith('位置(') && !location.address.includes('模拟地址')) 
+      return location.address
+    
+    // 坐标到道路名称的映射表
+    const coordToRoadMap = {
+      // 成都市主要路段映射 - 根据经纬度范围映射到具体道路
+      '104.06,30.57': '成都市锦江区人民东路',
+      '104.07,30.57': '成都市锦江区红星路',
+      '104.08,30.57': '成都市锦江区东大街',
+      '104.06,30.58': '成都市青羊区人民西路',
+      '104.07,30.58': '成都市青羊区文武路',
+      '104.08,30.58': '成都市青羊区蜀都大道',
+      '104.06,30.59': '成都市金牛区一环路',
+      '104.07,30.59': '成都市金牛区人民北路',
+      '104.05,30.57': '成都市武侯区天府大道',
+      '104.05,30.58': '成都市武侯区二环路',
+      '104.04,30.57': '成都市高新区天府五街',
+      '104.04,30.58': '成都市高新区剑南大道'
+    }
+    
+    // 提取坐标信息
+    let lng, lat
+    let coordFound = false
+    
+    // 尝试从不同格式获取坐标
+    if (location.coordinates) {
+      if (location.coordinates.type === 'Point' && Array.isArray(location.coordinates.coordinates)) {
+        [lng, lat] = location.coordinates.coordinates
+        coordFound = true
+      } else if (location.coordinates.lng !== undefined && location.coordinates.lat !== undefined) {
+        lng = location.coordinates.lng
+        lat = location.coordinates.lat
+        coordFound = true
+      }
+    } else if (location.position && location.position.lng && location.position.lat) {
+      lng = location.position.lng
+      lat = location.position.lat
+      coordFound = true
+    }
+    
+    // 如果找到坐标，查找映射
+    if (coordFound) {
+      // 截取坐标的前两位小数进行匹配
+      const shortCoord = `${lng.toFixed(2)},${lat.toFixed(2)}`
+      
+      // 检查是否有精确匹配
+      if (coordToRoadMap[shortCoord]) {
+        return coordToRoadMap[shortCoord]
+      }
+      
+      // 如果没有精确匹配，找最接近的道路（简单实现，仅供示例）
+      for (const key in coordToRoadMap) {
+        const [mapLng, mapLat] = key.split(',')
+        // 计算简单距离（不是精确的地理距离）
+        if (Math.abs(parseFloat(mapLng) - lng) < 0.03 && Math.abs(parseFloat(mapLat) - lat) < 0.03) {
+          return `${coordToRoadMap[key]}附近`
+        }
+      }
+      
+      // 如果找不到匹配，返回"成都市XXX路段"这样的描述
+      return `成都市${Math.floor((lat - 30.57) * 100)}区${Math.floor((lng - 104) * 100)}路段`
+    }
+    
+    // 如果所有方法都失败，返回通用信息
+    return '成都市区域内'
+  } catch (error) {
+    console.error('格式化位置信息错误:', error, location)
+    return '成都市区域内' // 出错时返回默认值
+  }
 }
 
 const locationSuccess = (result) => {
@@ -425,10 +613,30 @@ const handleMapReady = ({ BMap, map }) => {
 }
 
 const showTrafficDetail = (traffic) => {
-  selectedTraffic.value = traffic
-  isSubmitting.value = false
-  isEditing.value = false
-  dialogVisible.value = true
+  // 确保traffic对象有一个有效的position属性
+  if (!traffic.position && traffic.location) {
+    console.log('修正缺失的position属性:', traffic.id);
+    try {
+      // 尝试从location对象提取position信息
+      if (traffic.location.coordinates && traffic.location.coordinates.type === 'Point' && 
+          Array.isArray(traffic.location.coordinates.coordinates)) {
+        const [lng, lat] = traffic.location.coordinates.coordinates;
+        traffic.position = { lng, lat };
+      } else if (traffic.location.lng !== undefined && traffic.location.lat !== undefined) {
+        traffic.position = { 
+          lng: traffic.location.lng, 
+          lat: traffic.location.lat 
+        };
+      }
+    } catch (err) {
+      console.error('处理位置数据时出错:', err);
+    }
+  }
+  
+  selectedTraffic.value = traffic;
+  isSubmitting.value = false;
+  isEditing.value = false;
+  dialogVisible.value = true;
 }
 
 // 编辑路况信息
@@ -523,10 +731,17 @@ const adminApprove = async (trafficId) => {
 const refreshAllData = async () => {
   try {
     ElMessage.info('正在刷新数据...')
+    
+    // 先清空本地数据
+    store.commit('SET_TRAFFIC_LIST', []);
+    store.commit('SET_PENDING_VERIFICATIONS', []);
+    
+    // 然后从服务器获取最新数据
     await Promise.all([
       store.dispatch('getNearbyTrafficInfo'),
       store.dispatch('getPendingVerifications')
     ])
+    
     ElMessage.success('数据刷新成功')
   } catch (error) {
     console.error('数据刷新失败:', error)
@@ -597,12 +812,40 @@ const verifyTraffic = async (trafficId) => {
     ElMessage.warning('游客模式无法验证路况信息，请先登录')
     return
   }
+  
+  // 查找待验证的交通信息
+  const pendingItem = pendingVerifications.value.find(item => item.id === trafficId)
+  if (!pendingItem) {
+    ElMessage.error('未找到待验证的路况信息')
+    return
+  }
+  
+  // 检查用户是否已经验证过
+  if (hasUserVerified(pendingItem)) {
+    ElMessage.warning('您已经验证过此路况信息')
+    return
+  }
+  
   try {
+    if (!trafficId || typeof trafficId !== 'string') {
+      throw new Error('无效的路况ID格式')
+    }
+    console.log('开始验证路况信息:', trafficId)
     await store.dispatch('verifyTrafficInfo', { trafficId })
+    console.log('验证成功后，准备刷新界面数据')
     ElMessage.success('验证成功')
   } catch (error) {
     console.error('验证路况信息失败:', error)
-    ElMessage.error(error.message || '验证失败')
+    
+    // 获取详细错误信息
+    let errorMessage = '验证失败';
+    if (error.response && error.response.data && error.response.data.message) {
+      errorMessage = error.response.data.message;
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
+    ElMessage.error(errorMessage)
   }
 }
 
@@ -636,13 +879,28 @@ const updateTrafficInfo = async (updateData) => {
 }
 
 // 验证路况信息
-const verifyTrafficInfo = async (trafficId) => {
+const verifyTrafficInfo = async (traffic) => {
+  if (isGuest.value) {
+    ElMessage.warning('游客模式无法验证路况信息，请先登录')
+    return
+  }
   try {
+    const trafficId = traffic.id
+    if (!trafficId || typeof trafficId !== 'string') {
+      throw new Error('无效的路况ID格式')
+    }
+    console.log('开始验证路况信息:', trafficId)
     await store.dispatch('verifyTrafficInfo', { trafficId })
+    console.log('验证成功后，准备刷新界面数据')
     ElMessage.success('验证成功')
     dialogVisible.value = false
-    // 刷新数据
-    refreshAllData()
+    
+    // 强制延时刷新数据，确保后端更新完成
+    setTimeout(async () => {
+      console.log('延时刷新数据开始')
+      await refreshAllData()
+      console.log('延时刷新数据完成')
+    }, 500)
   } catch (error) {
     console.error('验证路况信息失败:', error)
     ElMessage.error(error.message || '验证失败')
@@ -658,6 +916,90 @@ const showLoginPrompt = () => {
 const showSubmitDialog = () => {
   // 直接跳转到提交页面
   router.push('/submit')
+}
+
+// 重置交通信息
+const resetTrafficInfo = async () => {
+  ElMessageBox.confirm(
+    '确定要重置所有交通信息吗？此操作将删除所有现有数据，并创建3条新的交通信息。此操作不可逆。',
+    '警告',
+    {
+      confirmButtonText: '确定重置',
+      cancelButtonText: '取消',
+      type: 'warning',
+    }
+  )
+    .then(async () => {
+      try {
+        ElMessage.info('正在重置交通信息...');
+        console.log('== 开始执行重置操作 ==');
+        console.log('用户信息:', store.state.userToken, '是否管理员:', store.getters.isAdmin);
+        
+        const result = await store.dispatch('resetTrafficInfo');
+        console.log('重置操作返回结果:', result);
+        ElMessage.success(result.message);
+        
+        // 延迟刷新确保后端处理完成
+        console.log('重置成功，准备刷新数据...');
+        
+        // 增加延迟时间和刷新逻辑
+        setTimeout(async () => {
+          console.log('开始延迟刷新...');
+          // 先清空本地数据
+          console.log('清空本地数据');
+          store.commit('SET_TRAFFIC_LIST', []);
+          store.commit('SET_PENDING_VERIFICATIONS', []);
+          
+          // 强制刷新
+          console.log('开始强制刷新数据');
+          try {
+            console.log('获取最新交通信息');
+            await store.dispatch('getNearbyTrafficInfo');
+            console.log('获取最新待验证信息');
+            await store.dispatch('getPendingVerifications');
+            console.log('数据刷新成功');
+            ElMessage.success('数据刷新成功');
+          } catch (refreshError) {
+            console.error('数据刷新失败:', refreshError);
+            ElMessage.error('数据刷新失败，请手动刷新页面');
+          }
+        }, 2000); // 增加延迟时间到2秒
+      } catch (error) {
+        console.error('重置交通信息失败:', error);
+        ElMessage.error(error.message || '重置失败');
+      }
+    })
+    .catch(() => {
+      ElMessage.info('已取消重置');
+    });
+}
+
+// 在script部分添加方法
+const getVerificationCount = (traffic) => {
+  // 获取验证数量，处理可能的各种格式
+  let verificationCount = 0;
+  if (traffic.verificationCount !== undefined) {
+    // 如果有verificationCount字段，直接使用
+    verificationCount = traffic.verificationCount;
+  } else if (traffic.verifications !== undefined) {
+    // 处理verifications可能是数字或数组的情况
+    if (Array.isArray(traffic.verifications)) {
+      verificationCount = traffic.verifications.length;
+    } else if (typeof traffic.verifications === 'number') {
+      verificationCount = traffic.verifications;
+    }
+  } else if (Array.isArray(traffic.verifiedBy)) {
+    // 如果有verifiedBy数组，用其长度
+    verificationCount = traffic.verifiedBy.length;
+  }
+  
+  return verificationCount;
+}
+
+// 添加一个方法检查用户是否已经验证过
+const hasUserVerified = (traffic) => {
+  const currentUserId = store.state.userToken;
+  return traffic.verifiedBy && traffic.verifiedBy.includes(currentUserId);
 }
 
 onMounted(() => {
@@ -808,3 +1150,4 @@ onMounted(() => {
   /* ... 原有的用户信息显示代码 ... */
 }
 </style>
+
