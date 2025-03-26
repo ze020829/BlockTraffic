@@ -48,7 +48,13 @@
                     <el-tag type="success" size="small">已确认</el-tag>
                   </div>
                 </template>
-                <p>{{ item.description }}</p>
+                
+                <!-- 添加图片缩略图显示 -->
+                <div v-if="item.imageHash" class="traffic-image-preview">
+                  <img :src="`/api/traffic/${item.hash}/image`" alt="路况图片" class="thumbnail" />
+                </div>
+                
+                <p class="traffic-description">{{ item.description || '无描述信息' }}</p>
                 <p class="time">{{ formatTime(item.timestamp || item.created) }}</p>
                 <p class="location">{{ formatLocation(item.location) }}</p>
                 
@@ -70,6 +76,7 @@
                   </el-button>
                 </div>
               </el-card>
+              <el-empty v-if="verifiedTraffic.length === 0" description="暂无已验证的路况信息"></el-empty>
             </el-scrollbar>
           </el-tab-pane>
 
@@ -89,7 +96,13 @@
                     </el-tag>
                   </div>
                 </template>
-                <p>{{ item.description }}</p>
+                
+                <!-- 添加图片缩略图显示 -->
+                <div v-if="item.imageHash" class="traffic-image-preview">
+                  <img :src="`/api/traffic/${item.hash}/image`" alt="路况图片" class="thumbnail" />
+                </div>
+                
+                <p class="traffic-description">{{ item.description || '无描述信息' }}</p>
                 <p class="time">{{ formatTime(item.timestamp || item.created) }}</p>
                 <p class="location">{{ formatLocation(item.location) }}</p>
                 <div class="verify-action">
@@ -129,6 +142,7 @@
                   </el-button>
                 </div>
               </el-card>
+              <el-empty v-if="pendingVerifications.length === 0" description="暂无待验证的路况信息"></el-empty>
             </el-scrollbar>
           </el-tab-pane>
           
@@ -355,7 +369,9 @@ import TrafficDetail from '../components/TrafficDetail.vue'
 import { useRouter } from 'vue-router'
 import Layout from '../components/Layout.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import axios from 'axios'
 
+const API_BASE_URL = '/api'
 const store = useStore()
 const router = useRouter()
 const center = ref({ lng: 116.404, lat: 39.915 })
@@ -469,7 +485,11 @@ const pendingVerifications = computed(() => {
 })
 
 const verifiedTraffic = computed(() => 
-  store.state.trafficList.filter(t => t.status === 'verified')
+  store.state.trafficList.filter(t => 
+    t.status === 'verified' || // 通过status字段检查
+    t.verifiedBy || // 通过verifiedBy字段检查
+    t.verifiedAt // 通过verifiedAt字段检查
+  )
 )
 
 const formatTime = (timestamp) => {
@@ -673,7 +693,7 @@ const deleteTraffic = (trafficId) => {
 const adminApprove = async (trafficId) => {
   try {
     // 确认管理员操作
-    ElMessageBox.confirm(
+    await ElMessageBox.confirm(
       '作为管理员，您可以直接批准此路况信息而无需等待5人验证。确定要批准吗？',
       '管理员批准',
       {
@@ -681,49 +701,40 @@ const adminApprove = async (trafficId) => {
         cancelButtonText: '取消',
         type: 'warning',
       }
-    ).then(async () => {
-      try {
-        // 查找待验证的交通信息
-        const pendingItem = pendingVerifications.value.find(item => item.id === trafficId)
-        if (!pendingItem) {
-          ElMessage.error('未找到待验证的路况信息')
-          return
-        }
-        
-        // 更新为已验证状态
-        const updatedItem = {
-          ...pendingItem,
-          status: 'verified',
-          verifications: 5,
-          verifiedBy: pendingItem.verifiedBy || []
-        }
-        
-        // 如果当前管理员不在验证列表中，添加进去
-        if (!updatedItem.verifiedBy.includes(store.state.userToken)) {
-          updatedItem.verifiedBy.push(store.state.userToken)
-        }
-        
-        // 从待验证列表中移除
-        const newPendingList = store.state.pendingVerifications.filter(item => item.id !== trafficId)
-        store.commit('SET_PENDING_VERIFICATIONS', newPendingList)
-        
-        // 添加到已验证列表
-        store.commit('SET_TRAFFIC_LIST', [...store.state.trafficList, updatedItem])
-        
+    )
+    
+    try {
+      // 查找待验证的交通信息
+      const pendingItem = pendingVerifications.value.find(item => item.id === trafficId)
+      if (!pendingItem) {
+        ElMessage.error('未找到待验证的路况信息')
+        return
+      }
+      
+      // 调用管理员批准API
+      const response = await axios.post(`${API_BASE_URL}/traffic/admin-verify`, {
+        hash: pendingItem.hash,
+        adminId: store.state.userToken
+      });
+      
+      if (response.data && response.data.success) {
         ElMessage.success('管理员批准成功')
-        
         // 刷新数据
         await refreshAllData()
-      } catch (error) {
-        console.error('管理员批准失败:', error)
-        ElMessage.error(error.message || '批准失败')
+      } else {
+        throw new Error(response.data.error || '批准失败')
       }
-    }).catch(() => {
-      ElMessage.info('已取消批准')
-    })
+    } catch (error) {
+      console.error('管理员批准失败:', error)
+      ElMessage.error(error.message || '批准失败')
+    }
   } catch (error) {
-    console.error('管理员批准失败:', error)
-    ElMessage.error(error.message || '批准失败')
+    if (error !== 'cancel') {
+      console.error('管理员批准失败:', error)
+      ElMessage.error(error.message || '批准失败')
+    } else {
+      ElMessage.info('已取消批准')
+    }
   }
 }
 
@@ -827,13 +838,24 @@ const verifyTraffic = async (trafficId) => {
   }
   
   try {
-    if (!trafficId || typeof trafficId !== 'string') {
-      throw new Error('无效的路况ID格式')
+    if (!pendingItem.hash) {
+      ElMessage.error('路况信息缺少哈希值，无法验证')
+      console.error('路况信息缺少hash:', pendingItem)
+      return
     }
-    console.log('开始验证路况信息:', trafficId)
-    await store.dispatch('verifyTrafficInfo', { trafficId })
-    console.log('验证成功后，准备刷新界面数据')
-    ElMessage.success('验证成功')
+    
+    console.log('开始验证路况信息:', pendingItem.id, 'hash:', pendingItem.hash)
+    const result = await store.dispatch('verifyTrafficInfo', { hash: pendingItem.hash })
+    
+    if (result && result.success) {
+      console.log('验证成功:', result)
+      ElMessage.success('验证成功!')
+      
+      // 立即刷新数据
+      await refreshAllData()
+    } else {
+      throw new Error(result?.message || '验证失败')
+    }
   } catch (error) {
     console.error('验证路况信息失败:', error)
     
@@ -890,7 +912,7 @@ const verifyTrafficInfo = async (traffic) => {
       throw new Error('无效的路况ID格式')
     }
     console.log('开始验证路况信息:', trafficId)
-    await store.dispatch('verifyTrafficInfo', { trafficId })
+    await store.dispatch('verifyTrafficInfo', { hash: traffic.hash })
     console.log('验证成功后，准备刷新界面数据')
     ElMessage.success('验证成功')
     dialogVisible.value = false
@@ -978,6 +1000,7 @@ const resetTrafficInfo = async () => {
 const getVerificationCount = (traffic) => {
   // 获取验证数量，处理可能的各种格式
   let verificationCount = 0;
+  
   if (traffic.verificationCount !== undefined) {
     // 如果有verificationCount字段，直接使用
     verificationCount = traffic.verificationCount;
@@ -988,9 +1011,14 @@ const getVerificationCount = (traffic) => {
     } else if (typeof traffic.verifications === 'number') {
       verificationCount = traffic.verifications;
     }
-  } else if (Array.isArray(traffic.verifiedBy)) {
-    // 如果有verifiedBy数组，用其长度
-    verificationCount = traffic.verifiedBy.length;
+  } else if (traffic.verifiedBy !== undefined) {
+    // 优先处理verifiedBy数组
+    if (Array.isArray(traffic.verifiedBy)) {
+      verificationCount = traffic.verifiedBy.length;
+    } else if (typeof traffic.verifiedBy === 'string') {
+      // 如果是单个用户ID字符串，则计数为1
+      verificationCount = 1;
+    }
   }
   
   return verificationCount;
@@ -999,7 +1027,26 @@ const getVerificationCount = (traffic) => {
 // 添加一个方法检查用户是否已经验证过
 const hasUserVerified = (traffic) => {
   const currentUserId = store.state.userToken;
-  return traffic.verifiedBy && traffic.verifiedBy.includes(currentUserId);
+  
+  if (!currentUserId || !traffic) {
+    return false;
+  }
+  
+  // 处理verifiedBy可能的各种格式
+  if (traffic.verifiedBy) {
+    if (Array.isArray(traffic.verifiedBy)) {
+      return traffic.verifiedBy.includes(currentUserId);
+    } else if (typeof traffic.verifiedBy === 'string') {
+      return traffic.verifiedBy === currentUserId;
+    }
+  }
+  
+  // 处理旧数据格式
+  if (traffic.verifications && Array.isArray(traffic.verifications)) {
+    return traffic.verifications.some(v => v.userId === currentUserId);
+  }
+  
+  return false;
 }
 
 onMounted(() => {
@@ -1013,7 +1060,15 @@ onMounted(() => {
   
   // 初始加载
   store.dispatch('getNearbyTrafficInfo')
+    .then(() => {
+      console.log('已验证路况信息:', verifiedTraffic.value.length, '条');
+      console.log('已验证路况信息详情:', verifiedTraffic.value);
+    });
   store.dispatch('getPendingVerifications')
+    .then(() => {
+      console.log('待验证路况信息:', pendingVerifications.value.length, '条');
+      console.log('待验证路况信息详情:', pendingVerifications.value);
+    });
 })
 </script>
 
@@ -1053,10 +1108,12 @@ onMounted(() => {
 .traffic-card {
   margin-bottom: 10px;
   cursor: pointer;
+  transition: all 0.3s;
 }
 
 .traffic-card:hover {
-  box-shadow: 0 2px 12px 0 rgba(0,0,0,.1);
+  transform: translateY(-3px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .card-header {
@@ -1065,10 +1122,25 @@ onMounted(() => {
   align-items: center;
 }
 
+.traffic-description {
+  font-size: 14px;
+  margin: 10px 0;
+  min-height: 20px;
+  color: #333;
+  font-weight: normal;
+  line-height: 1.5;
+}
+
 .time {
   font-size: 12px;
-  color: #999;
+  color: #909399;
   margin-top: 8px;
+}
+
+.location {
+  font-size: 12px;
+  color: #606266;
+  margin-top: 4px;
 }
 
 .verify-action {
@@ -1148,6 +1220,27 @@ onMounted(() => {
 
 .user-info {
   /* ... 原有的用户信息显示代码 ... */
+}
+
+.traffic-image-preview {
+  margin: 10px 0;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.thumbnail {
+  width: 150px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #ebeef5;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  transition: all 0.3s;
+}
+
+.thumbnail:hover {
+  transform: scale(1.05);
 }
 </style>
 

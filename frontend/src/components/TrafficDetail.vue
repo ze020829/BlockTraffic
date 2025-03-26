@@ -4,9 +4,17 @@
       <h3>路况信息</h3>
       <p>类型：{{ typeText[traffic.type] }}</p>
       <p>地点：{{ formatLocation(traffic.location) }}</p>
-      <p>描述：{{ traffic.description }}</p>
+      <p>描述：{{ traffic.description || '无描述信息' }}</p>
       <p>提交时间：{{ formatTime(traffic.timestamp || traffic.created) }}</p>
       <p>确认数：{{ verificationStatus }}</p>
+    </div>
+
+    <!-- 添加图片显示区域 -->
+    <div v-if="imageUrl" class="image-section">
+      <h4>路况图片</h4>
+      <div class="image-container">
+        <img :src="imageUrl" alt="路况图片" class="traffic-image" />
+      </div>
     </div>
 
     <div class="action-section">
@@ -52,6 +60,16 @@ const typeText = {
   accident: '交通事故',
   normal: '道路正常'
 }
+
+// 获取图片URL
+const imageUrl = computed(() => {
+  if (props.traffic.imageHash) {
+    return `/api/traffic/${props.traffic.hash}/image`;
+  } else if (props.traffic.imageUrl) {
+    return props.traffic.imageUrl;
+  }
+  return null;
+});
 
 // 改进的时间格式化函数，处理无效日期
 const formatTime = (timestamp) => {
@@ -181,11 +199,11 @@ const handleVerify = async () => {
   try {
     isVerifying.value = true
     const result = await store.dispatch('verifyTrafficInfo', { 
-      trafficId: props.traffic.id 
+      hash: props.traffic.hash 
     })
     
     if (result) {
-      ElMessage.success(`验证成功！获得 ${result.reward.tokens} 代币和 ${result.reward.reputation} 信誉度`)
+      ElMessage.success(`验证成功！获得 ${result.reward?.tokens || 2} 代币和 ${result.reward?.reputation || 1} 信誉度`)
       emit('verify', result)
     }
   } catch (error) {
@@ -253,6 +271,28 @@ const verificationStatus = computed(() => {
 
 .info-section {
   margin-bottom: 20px;
+}
+
+/* 添加图片容器样式 */
+.image-section {
+  margin-bottom: 20px;
+}
+
+.image-container {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  margin: 10px 0;
+  overflow: hidden;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+}
+
+.traffic-image {
+  max-width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border-radius: 4px;
 }
 
 .action-section {

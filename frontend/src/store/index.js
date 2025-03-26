@@ -1,7 +1,7 @@
 import { createStore } from 'vuex'
 import axios from 'axios'
 
-const API_BASE_URL = 'http://localhost:3000/api'
+const API_BASE_URL = '/api'
 
 // 数据存储说明:
 // 1. 用户信息 - 存储在区块链上
@@ -166,13 +166,73 @@ export default createStore({
     // 获取所有用户信息
     async getAllUsers({ commit }) {
       try {
-        const response = await axios.get(`${API_BASE_URL}/user/all-credentials`)
-        const users = response.data
-        commit('SET_USER_LIST', users)
-        return users
+        // 首先尝试从wallet获取用户身份列表
+        try {
+          const identitiesResponse = await axios.get(`${API_BASE_URL}/user/identities`)
+          if (identitiesResponse.data && Array.isArray(identitiesResponse.data) && identitiesResponse.data.length > 0) {
+            console.log('从wallet获取到用户身份列表:', identitiesResponse.data)
+            
+            // 转换wallet身份列表为用户列表格式
+            const walletUsers = identitiesResponse.data.map(identity => {
+              // 查找默认用户列表中是否有匹配的用户
+              const defaultUser = defaultUsers.find(u => u.id === identity.id) || {}
+              
+              return {
+                id: identity.id,
+                role: identity.id === 'admin' ? 'admin' : 'user',
+                reputation: defaultUser.reputation || 80,
+                tokens: defaultUser.tokens || 100
+              }
+            })
+            
+            // 尝试从API获取用户信誉度和代币数据
+            try {
+              const credentialsResponse = await axios.get(`${API_BASE_URL}/user/all-credentials`)
+              if (credentialsResponse.data && Array.isArray(credentialsResponse.data)) {
+                // 合并wallet用户和区块链用户数据
+                const mergedUsers = walletUsers.map(walletUser => {
+                  const blockchainUser = credentialsResponse.data.find(u => u.id === walletUser.id) || {}
+                  return {
+                    ...walletUser,
+                    reputation: blockchainUser.reputation || walletUser.reputation,
+                    tokens: blockchainUser.credits || walletUser.tokens
+                  }
+                })
+                
+                commit('SET_USER_LIST', mergedUsers)
+                return mergedUsers
+              }
+            } catch (credentialsError) {
+              console.warn('无法从区块链获取用户信誉度和代币数据:', credentialsError.message)
+            }
+            
+            // 如果无法获取区块链数据，仅使用wallet用户列表
+            commit('SET_USER_LIST', walletUsers)
+            return walletUsers
+          }
+        } catch (identitiesError) {
+          console.warn('无法从wallet获取用户身份列表:', identitiesError.message)
+        }
+        
+        // 如果无法从wallet获取，尝试从区块链获取用户列表
+        try {
+          const response = await axios.get(`${API_BASE_URL}/user/all-credentials`)
+          if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+            commit('SET_USER_LIST', response.data)
+            return response.data
+          }
+        } catch (apiError) {
+          console.warn('无法从API获取用户列表，使用默认用户列表:', apiError.message)
+        }
+        
+        // 如果所有API调用都失败，使用默认用户列表
+        console.log('使用默认用户列表')
+        commit('SET_USER_LIST', defaultUsers)
+        return defaultUsers
       } catch (error) {
-        console.error('获取用户列表失败:', error)
-        throw error
+        console.error('获取用户列表过程中发生错误:', error)
+        commit('SET_USER_LIST', defaultUsers) // 确保用户列表不为空
+        return defaultUsers
       }
     },
     
@@ -194,93 +254,46 @@ export default createStore({
       try {
         console.log('正在获取附近交通信息...');
         
-        // 从IPFS通过API获取已验证的交通信息
-        // 目前通过MongoDB API过渡实现，后续将迁移到IPFS
-        const response = await axios.get(`${API_BASE_URL}/mongodb/traffic`, {
-          params: {
-            status: 'verified',
-            lng: state.userPosition.longitude,
-            lat: state.userPosition.latitude,
-            radius: 10 // 10公里范围内
-          }
-        });
-        
-        if (!response.data.success) {
-          throw new Error(response.data.message || '获取交通信息失败');
+        // 从用户位置获取经纬度
+        let position;
+        try {
+          position = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(
+              (pos) => resolve({
+                lat: pos.coords.latitude,
+                lng: pos.coords.longitude
+              }),
+              (err) => reject(err),
+              { timeout: 10000 }
+            );
+          });
+        } catch (e) {
+          console.warn('无法获取位置，使用默认位置', e);
+          position = { lat: 30.5728, lng: 104.0668 };
         }
         
-        // 记录返回的数据结构，帮助调试
-        console.log('返回的交通数据示例:', response.data.data.length > 0 ? JSON.stringify(response.data.data[0], null, 2) : '无数据');
+        // 构建请求参数
+        const params = { 
+          lat: position.lat, 
+          lng: position.lng,
+          radius: 10 // 10公里范围内
+        };
         
-        // 处理数据转换，确保格式符合前端期望
-        const formattedData = response.data.data.map(item => {
-          // 确保每个项目都有position属性，百度地图需要这个格式
-          const formattedItem = {...item};
-          
-          // 调试用: 输出位置信息
-          console.debug('处理位置数据:', item.trafficId, item.location);
-          
-          try {
-            // 从各种可能的格式中提取经纬度
-            if (item.location && item.location.coordinates) {
-              // GeoJSON Point格式: location.coordinates.coordinates = [lng, lat]
-              if (item.location.coordinates.coordinates && Array.isArray(item.location.coordinates.coordinates)) {
-                const [lng, lat] = item.location.coordinates.coordinates;
-                formattedItem.position = { lng, lat };
-                console.debug('-> 从coordinates.coordinates提取:', formattedItem.position);
-              }
-              // 坐标直接是数组: location.coordinates = [lng, lat]
-              else if (Array.isArray(item.location.coordinates)) {
-                const [lng, lat] = item.location.coordinates;
-                formattedItem.position = { lng, lat };
-                console.debug('-> 从coordinates数组提取:', formattedItem.position);
-              }
-              // 坐标是嵌套对象: location.coordinates = {type: 'Point', coordinates: [lng, lat]}
-              else if (item.location.coordinates.type === 'Point' && Array.isArray(item.location.coordinates.coordinates)) {
-                const [lng, lat] = item.location.coordinates.coordinates;
-                formattedItem.position = { lng, lat };
-                console.debug('-> 从GeoJSON Point提取:', formattedItem.position);
-              }
-            }
-            // 直接有lng/lat属性
-            else if (item.location && item.location.lng !== undefined && item.location.lat !== undefined) {
-              formattedItem.position = {
-                lng: item.location.lng,
-                lat: item.location.lat
-              };
-              console.debug('-> 从location.lng/lat提取:', formattedItem.position);
-            }
-            // 检查是否已有position属性
-            else if (item.position && item.position.lng !== undefined && item.position.lat !== undefined) {
-              // position属性已存在且有效，不需要额外处理
-              console.debug('-> 已有position属性:', item.position);
-            }
-            // 如果仍然没有位置信息，创建一个默认位置（成都）
-            if (!formattedItem.position) {
-              console.warn('无法提取位置信息，使用默认位置:', item.trafficId);
-              formattedItem.position = { lng: 104.0668, lat: 30.5728 };
-              console.debug('-> 使用默认位置:', formattedItem.position);
-            }
-          } catch (error) {
-            console.error('处理位置数据时出错:', error, item);
-            // 设置默认位置
-            formattedItem.position = { lng: 104.0668, lat: 30.5728 };
-          }
-          
-          // 确保有id属性（可能在MongoDB中是trafficId）
-          if (!formattedItem.id && formattedItem.trafficId) {
-            formattedItem.id = formattedItem.trafficId;
-          }
-          
-          return formattedItem;
-        });
+        // 从API获取交通信息
+        const response = await axios.get(`${API_BASE_URL}/traffic/nearby`, { params });
         
-        console.log(`获取到${response.data.data.length}条附近交通信息，转换后:`, formattedData.length);
-        commit('SET_TRAFFIC_LIST', formattedData);
-        return formattedData;
+        if (response.data && response.data.success) {
+          console.log(`获取到${response.data.data.length}条附近交通信息`);
+          commit('SET_TRAFFIC_LIST', response.data.data);
+          return response.data.data;
+        } else {
+          console.warn('API返回数据格式不符合预期:', response.data);
+          commit('SET_TRAFFIC_LIST', []);
+          return [];
+        }
       } catch (error) {
         console.error('获取附近交通信息失败:', error);
-        // 如果API调用失败，返回空数组而不是抛出错误
+        // 如果API调用失败，返回空数组
         commit('SET_TRAFFIC_LIST', []);
         return [];
       }
@@ -291,92 +304,20 @@ export default createStore({
       try {
         console.log('正在获取待验证交通信息...');
         
-        // 调用MongoDB API获取待验证的交通信息
-        const response = await axios.get(`${API_BASE_URL}/mongodb/traffic`, {
-          params: {
-            status: 'pending',
-            lng: state.userPosition.longitude,
-            lat: state.userPosition.latitude,
-            radius: 10 // 10公里范围内
-          }
-        });
+        // 从API获取待验证的交通信息
+        const response = await axios.get(`${API_BASE_URL}/traffic/pending`);
         
-        if (!response.data.success) {
-          throw new Error(response.data.message || '获取待验证信息失败');
+        if (response.data && response.data.success) {
+          console.log(`获取到${response.data.data.length}条待验证交通信息`);
+          commit('SET_PENDING_VERIFICATIONS', response.data.data);
+          return response.data.data;
+        } else {
+          console.warn('API返回数据格式不符合预期:', response.data);
+          commit('SET_PENDING_VERIFICATIONS', []);
+          return [];
         }
-        
-        // 记录返回的数据结构，帮助调试
-        console.log('返回的待验证数据示例:', response.data.data.length > 0 ? JSON.stringify(response.data.data[0], null, 2) : '无数据');
-        
-        // 处理数据转换，确保格式符合前端期望
-        const formattedData = response.data.data.map(item => {
-          // 确保每个项目都有position属性，百度地图需要这个格式
-          const formattedItem = {...item};
-          
-          // 调试用: 输出位置信息
-          console.debug('处理待验证位置数据:', item.trafficId, item.location);
-          
-          try {
-            // 从各种可能的格式中提取经纬度
-            if (item.location && item.location.coordinates) {
-              // GeoJSON Point格式: location.coordinates.coordinates = [lng, lat]
-              if (item.location.coordinates.coordinates && Array.isArray(item.location.coordinates.coordinates)) {
-                const [lng, lat] = item.location.coordinates.coordinates;
-                formattedItem.position = { lng, lat };
-                console.debug('-> 从coordinates.coordinates提取:', formattedItem.position);
-              }
-              // 坐标直接是数组: location.coordinates = [lng, lat]
-              else if (Array.isArray(item.location.coordinates)) {
-                const [lng, lat] = item.location.coordinates;
-                formattedItem.position = { lng, lat };
-                console.debug('-> 从coordinates数组提取:', formattedItem.position);
-              }
-              // 坐标是嵌套对象: location.coordinates = {type: 'Point', coordinates: [lng, lat]}
-              else if (item.location.coordinates.type === 'Point' && Array.isArray(item.location.coordinates.coordinates)) {
-                const [lng, lat] = item.location.coordinates.coordinates;
-                formattedItem.position = { lng, lat };
-                console.debug('-> 从GeoJSON Point提取:', formattedItem.position);
-              }
-            }
-            // 直接有lng/lat属性
-            else if (item.location && item.location.lng !== undefined && item.location.lat !== undefined) {
-              formattedItem.position = {
-                lng: item.location.lng,
-                lat: item.location.lat
-              };
-              console.debug('-> 从location.lng/lat提取:', formattedItem.position);
-            }
-            // 检查是否已有position属性
-            else if (item.position && item.position.lng !== undefined && item.position.lat !== undefined) {
-              // position属性已存在且有效，不需要额外处理
-              console.debug('-> 已有position属性:', item.position);
-            }
-            // 如果仍然没有位置信息，创建一个默认位置（成都）
-            if (!formattedItem.position) {
-              console.warn('无法提取位置信息，使用默认位置:', item.trafficId);
-              formattedItem.position = { lng: 104.0668, lat: 30.5728 };
-              console.debug('-> 使用默认位置:', formattedItem.position);
-            }
-          } catch (error) {
-            console.error('处理待验证位置数据时出错:', error, item);
-            // 设置默认位置
-            formattedItem.position = { lng: 104.0668, lat: 30.5728 };
-          }
-          
-          // 确保有id属性（可能在MongoDB中是trafficId）
-          if (!formattedItem.id && formattedItem.trafficId) {
-            formattedItem.id = formattedItem.trafficId;
-          }
-          
-          return formattedItem;
-        });
-        
-        console.log(`获取到${response.data.data.length}条待验证交通信息，转换后:`, formattedData.length);
-        commit('SET_PENDING_VERIFICATIONS', formattedData);
-        return formattedData;
       } catch (error) {
         console.error('获取待验证交通信息失败:', error);
-        // 如果API调用失败，返回空数组而不是抛出错误
         commit('SET_PENDING_VERIFICATIONS', []);
         return [];
       }
@@ -531,196 +472,39 @@ export default createStore({
     },
     
     // 验证路况信息
-    async verifyTrafficInfo({ commit, state, dispatch }, { trafficId }) {
-      if (state.isGuest) {
-        throw new Error('游客模式无法验证路况信息，请先登录')
-      }
-
-      // 检查trafficId的有效性
-      if (!trafficId || typeof trafficId !== 'string') {
-        throw new Error('无效的路况ID格式')
-      }
-      
+    async verifyTrafficInfo({ commit, state, dispatch }, { hash, verified = true }) {
       try {
-        if (!state.userToken) {
-          throw new Error('用户未登录')
-        }
-
-        // 先检查用户是否已经验证过
-        const pendingItem = state.pendingVerifications.find(item => item.id === trafficId);
-        if (pendingItem && pendingItem.verifiedBy && pendingItem.verifiedBy.includes(state.userToken)) {
-          throw new Error('您已经验证过此路况信息');
-        }
-
-        // 根据ID格式处理，在MongoDB中的ID是 test_traffic_XXX 格式
-        let actualTrafficId = trafficId;
-        
-        // 处理各种可能的ID格式
-        if (trafficId.startsWith('pending_')) {
-          actualTrafficId = `test_traffic_00${trafficId.substring(8)}`;
-        } else if (trafficId === '0') {
-          actualTrafficId = 'test_traffic_001';
+        if (!state.currentUser) {
+          throw new Error('用户未登录');
         }
         
-        console.log(`发送验证请求，原始ID: ${trafficId}, 实际使用ID: ${actualTrafficId}, 当前用户: ${state.userToken}`);
+        const userId = state.currentUser.id;
         
-        try {
-          const response = await axios.post(`${API_BASE_URL}/mongodb/traffic/verify/${actualTrafficId}`, {
-            userId: state.userToken,
-            result: true
-          });
-  
-          console.log('验证请求响应:', response.data);
-  
-          if (!response.data.success) {
-            throw new Error(response.data.message || '验证失败');
-          }
-  
-          const result = response.data.data;
+        const response = await axios.post(`${API_BASE_URL}/traffic/verify`, {
+          hash,
+          userId,
+          verified
+        });
+        
+        if (response.data && response.data.success) {
+          // 更新待验证列表和已验证列表
+          dispatch('getPendingVerifications');
+          dispatch('getNearbyTrafficInfo');
           
-          // 更新待验证列表中的项目
-          const pendingIndex = state.pendingVerifications.findIndex(item => item.id === trafficId);
-          if (pendingIndex !== -1) {
-            const updatedItem = {
-              ...state.pendingVerifications[pendingIndex],
-              verificationCount: result.verificationCount,
-              verifications: result.verificationCount,
-              verifiedBy: result.verifiedBy || [],
-              status: result.status
-            };
-            
-            console.log('更新状态 - 确认计数:', result.verificationCount, '确认用户:', result.verifiedBy);
-  
-            // 如果已经验证完成，移动到已验证列表
-            if (result.status === 'verified') {
-              const newPendingList = state.pendingVerifications.filter(item => item.id !== trafficId);
-              commit('SET_PENDING_VERIFICATIONS', newPendingList);
-              commit('SET_TRAFFIC_LIST', [...state.trafficList, updatedItem]);
-            } else {
-              // 否则更新待验证列表
-              const newPendingList = [...state.pendingVerifications];
-              newPendingList[pendingIndex] = updatedItem;
-              commit('SET_PENDING_VERIFICATIONS', newPendingList);
-            }
-          }
-  
-          // 更新用户信息
-          if (result.reward) {
-            commit('UPDATE_USER_STATS', {
-              reputation: result.reward.reputation,
-              tokens: result.reward.tokens
-            });
-          }
-  
-          // 更新用户验证历史
-          const newVerification = {
-            id: `ver_${state.userToken}_${Date.now()}`,
-            timestamp: Date.now(),
-            type: state.pendingVerifications[pendingIndex]?.type,
-            location: state.pendingVerifications[pendingIndex]?.location,
-            result: 'correct',
-            reputation: result.reward.reputation
+          return { 
+            success: true, 
+            message: '验证成功', 
+            data: response.data.data 
           };
-  
-          if (!userVerificationHistories[state.userToken]) {
-            userVerificationHistories[state.userToken] = [];
-          }
-  
-          userVerificationHistories[state.userToken] = [newVerification, ...userVerificationHistories[state.userToken]];
-          commit('SET_VERIFICATION_HISTORY', userVerificationHistories[state.userToken]);
-  
-          return result;
-        } catch (error) {
-          console.error('验证路况信息失败:', error);
-          
-          // 检查是否为404错误，如果是，尝试直接使用test_traffic_001
-          if (error.response && error.response.status === 404) {
-            try {
-              console.log('尝试使用固定ID重新发送请求: test_traffic_001');
-              const retryResponse = await axios.post(`${API_BASE_URL}/mongodb/traffic/verify/test_traffic_001`, {
-                userId: state.userToken,
-                result: true
-              });
-              
-              if (retryResponse.data.success) {
-                console.log('使用固定ID验证成功:', retryResponse.data);
-                
-                // 获取结果数据
-                const retryResult = retryResponse.data.data;
-                
-                // 更新待验证列表中的项目 - 使用原始trafficId匹配
-                const pendingIndex = state.pendingVerifications.findIndex(item => item.id === trafficId);
-                console.log(`重试成功，查找原始ID ${trafficId} 在待验证列表中的位置:`, pendingIndex);
-                console.log('当前待验证列表:', JSON.stringify(state.pendingVerifications.map(i => ({id: i.id, type: i.type})), null, 2));
-
-                if (pendingIndex !== -1) {
-                  const updatedItem = {
-                    ...state.pendingVerifications[pendingIndex],
-                    verificationCount: retryResult.verificationCount,
-                    verifications: retryResult.verificationCount,
-                    verifiedBy: retryResult.verifiedBy || [],
-                    status: retryResult.status
-                  };
-                  console.log('更新后的项目:', updatedItem);
-                  console.log('更新状态 - 确认计数:', retryResult.verificationCount, '确认用户:', retryResult.verifiedBy);
-                  
-                  // 如果已经验证完成，移动到已验证列表
-                  if (retryResult.status === 'verified') {
-                    const newPendingList = state.pendingVerifications.filter(item => item.id !== trafficId);
-                    console.log('状态已验证，移动到已验证列表，剩余待验证项目数:', newPendingList.length);
-                    commit('SET_PENDING_VERIFICATIONS', newPendingList);
-                    commit('SET_TRAFFIC_LIST', [...state.trafficList, updatedItem]);
-                  } else {
-                    // 否则更新待验证列表
-                    const newPendingList = [...state.pendingVerifications];
-                    newPendingList[pendingIndex] = updatedItem;
-                    console.log('状态待验证，更新待验证列表');
-                    commit('SET_PENDING_VERIFICATIONS', newPendingList);
-                  }
-                } else {
-                  console.error('找不到匹配的待验证项目！尝试强制刷新数据');
-                  // 如果找不到匹配项，尝试刷新数据
-                  dispatch('getPendingVerifications');
-                  dispatch('getNearbyTrafficInfo');
-                }
-                
-                // 更新用户信息
-                if (retryResult.reward) {
-                  commit('UPDATE_USER_STATS', {
-                    reputation: retryResult.reward.reputation,
-                    tokens: retryResult.reward.tokens
-                  });
-                }
-                
-                // 更新用户验证历史
-                const newVerification = {
-                  id: `ver_${state.userToken}_${Date.now()}`,
-                  timestamp: Date.now(),
-                  type: state.pendingVerifications[pendingIndex]?.type,
-                  location: state.pendingVerifications[pendingIndex]?.location,
-                  result: 'correct',
-                  reputation: retryResult.reward.reputation
-                };
-                
-                if (!userVerificationHistories[state.userToken]) {
-                  userVerificationHistories[state.userToken] = [];
-                }
-                
-                userVerificationHistories[state.userToken] = [newVerification, ...userVerificationHistories[state.userToken]];
-                commit('SET_VERIFICATION_HISTORY', userVerificationHistories[state.userToken]);
-                
-                return retryResult;
-              }
-            } catch (retryError) {
-              console.error('重试验证失败:', retryError);
-            }
-          }
-          
-          throw error;
+        } else {
+          throw new Error(response.data.error || '验证失败');
         }
       } catch (error) {
         console.error('验证路况信息失败:', error);
-        throw error;
+        return { 
+          success: false, 
+          message: error.message || '验证失败' 
+        };
       }
     },
     
@@ -784,55 +568,32 @@ export default createStore({
       }
     },
     
+    // 获取用户提交历史
     async getSubmissionHistory({ commit, state }) {
       try {
-        // 如果是游客模式，直接返回空数组
-        if (state.isGuest) {
-          commit('SET_SUBMISSION_HISTORY', [])
-          return []
+        if (!state.currentUser) {
+          return { success: false, message: '用户未登录' };
         }
         
-        // 使用模拟数据代替API请求
-        const userId = state.userToken
-        if (!userId) {
-          throw new Error('用户未登录')
-        }
+        const userId = state.currentUser.id;
+        const response = await axios.get(`${API_BASE_URL}/traffic/user/${userId}`);
         
-        // 如果没有该用户的历史记录，则创建模拟数据
-        if (!userSubmissionHistories[userId]) {
-          // 生成3-6条随机提交历史
-          const count = Math.floor(Math.random() * 4) + 3
-          const history = []
-          const types = ['congestion', 'construction', 'accident', 'normal']
-          const locations = [
-            '成都市武侯区天府大道',
-            '成都市锦江区春熙路',
-            '成都市青羊区人民中路',
-            '成都市高新区天府软件园',
-            '成都市双流区双流国际机场'
-          ]
-          
-          for (let i = 0; i < count; i++) {
-            const now = Date.now()
-            history.push({
-              id: `sub_${userId}_${now - i * 86400000}`,
-              timestamp: now - i * 86400000, // 每天一条记录
-              type: types[Math.floor(Math.random() * types.length)],
-              location: locations[Math.floor(Math.random() * locations.length)],
-              status: Math.random() > 0.2 ? 'success' : 'failed',
-              reward: Math.random() > 0.2 ? 10 : 0
-            })
-          }
-          
-          userSubmissionHistories[userId] = history
+        if (response.data && response.data.success) {
+          commit('SET_SUBMISSION_HISTORY', response.data.data);
+          return { 
+            success: true, 
+            data: response.data.data 
+          };
+        } else {
+          throw new Error(response.data.error || '获取历史记录失败');
         }
-        
-        commit('SET_SUBMISSION_HISTORY', userSubmissionHistories[userId])
-        return userSubmissionHistories[userId]
       } catch (error) {
-        console.error('获取提交历史失败:', error)
-        commit('SET_SUBMISSION_HISTORY', [])
-        return []
+        console.error('获取用户提交历史失败:', error);
+        commit('SET_SUBMISSION_HISTORY', []);
+        return { 
+          success: false, 
+          message: error.message || '获取历史记录失败' 
+        };
       }
     },
     
@@ -1031,16 +792,16 @@ export default createStore({
         
         // 步骤1: 删除所有交通信息
         console.log('开始删除所有交通信息...');
-        console.log('删除API URL:', `${API_BASE_URL}/mongodb/traffic/all`);
+        console.log('删除API URL:', `${API_BASE_URL}/traffic/all`);
         
         let deleteResponse;
         try {
           // 先尝试获取当前交通信息数量
-          const currentTrafficResponse = await axios.get(`${API_BASE_URL}/mongodb/traffic/all`);
+          const currentTrafficResponse = await axios.get(`${API_BASE_URL}/traffic/all`);
           console.log('当前交通信息数量:', currentTrafficResponse.data?.length || '未知');
           
           // 发送删除请求
-          deleteResponse = await axios.delete(`${API_BASE_URL}/mongodb/traffic/all`);
+          deleteResponse = await axios.delete(`${API_BASE_URL}/traffic/all`);
           console.log('删除操作返回结果:', deleteResponse.data);
           
           if (!deleteResponse.data.success) {
@@ -1138,12 +899,12 @@ export default createStore({
         ];
         
         console.log('准备创建的交通信息:', newTrafficData.length, '条');
-        console.log('创建API URL:', `${API_BASE_URL}/mongodb/traffic/bulk`);
+        console.log('创建API URL:', `${API_BASE_URL}/traffic/bulk`);
         
         // 批量创建交通信息
         let createResponse;
         try {
-          createResponse = await axios.post(`${API_BASE_URL}/mongodb/traffic/bulk`, newTrafficData);
+          createResponse = await axios.post(`${API_BASE_URL}/traffic/bulk`, newTrafficData);
           console.log('创建操作结果:', createResponse.data);
           
           if (!createResponse.data.success) {
@@ -1195,5 +956,6 @@ export default createStore({
     canVerifyTraffic: state => !state.isGuest,
     // 判断是否可以更新用户信息
     canUpdateUser: state => !state.isGuest
-  }
+  },
+  modules: {}
 })

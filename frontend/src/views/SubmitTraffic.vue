@@ -164,8 +164,7 @@ const form = reactive({
 const rules = {
   location: [{ required: true, message: '请选择位置', trigger: 'change' }],
   type: [{ required: true, message: '请选择路况类型', trigger: 'change' }],
-  description: [{ required: true, message: '请输入描述', trigger: 'blur' }],
-  images: [{ required: true, message: '请上传至少一张图片', trigger: 'change' }]
+  description: [{ required: true, message: '请输入描述', trigger: 'blur' }]
 }
 
 const typeText = {
@@ -339,30 +338,62 @@ const beforeUpload = (file) => {
 
 const uploadImage = async ({ file }) => {
   try {
-    // 创建 FormData
-    const formData = new FormData()
-    formData.append('image', file)
+    if (!form.location || !form.type) {
+      ElMessage.warning('请先填写位置和路况类型');
+      return false;
+    }
+    
+    // 获取当前用户ID
+    const userId = store.getters.currentUser?.id || 'user1';
+    
+    // 创建FormData
+    const formData = new FormData();
+    formData.append('image', file);
+    formData.append('location', form.location);
+    formData.append('type', form.type);
+    formData.append('userId', userId);
+    
+    if (form.description) {
+      formData.append('description', form.description);
+    }
+    
+    if (form.position) {
+      formData.append('position', JSON.stringify(form.position));
+    }
+    
+    console.log('发送请求到:', '/api/traffic/upload');
     
     // 发送到后端
-    const { data } = await axios.post('http://localhost:3000/api/traffic/upload', formData, {
+    const response = await axios.post('/api/traffic/upload', formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       }
-    })
+    });
     
-    const { url, hash } = data
-    
-    // 添加到表单数据
-    form.images.push({
-      name: file.name,
-      url: url,
-      hash: hash
-    })
-    
-    ElMessage.success('图片上传成功')
+    if (response.data.success) {
+      ElMessage.success('图片上传成功');
+      
+      // 添加到表单数据
+      form.images.push({
+        name: file.name,
+        url: `/api/traffic/${response.data.data.hash}/image`,
+        hash: response.data.data.hash
+      });
+      
+      return {
+        success: true,
+        hash: response.data.data.hash
+      };
+    } else {
+      throw new Error(response.data.error || '上传失败');
+    }
   } catch (error) {
-    console.error('上传失败:', error.message)
-    ElMessage.error(error.response?.data?.error || '图片上传失败')
+    console.error('上传失败:', error);
+    ElMessage.error('上传失败: ' + (error.response?.data?.error || error.message));
+    return {
+      success: false,
+      error: error.message
+    };
   }
 }
 
@@ -371,32 +402,35 @@ const handleExceed = () => {
 }
 
 const submitForm = async () => {
-  if (!formRef.value) return
+  if (!formRef.value) return;
   
   await formRef.value.validate(async (valid) => {
     if (valid) {
       if (form.images.length === 0) {
-        ElMessage.warning('请至少上传一张图片')
-        return
+        ElMessage.warning('请至少上传一张图片');
+        return;
       }
       
       try {
-        await store.dispatch('submitTrafficInfo', {
-          ...form,
-          // 只发送图片的 IPFS hash
-          images: form.images.map(img => ({
-            name: img.name,
-            hash: img.hash
-          })),
-          timestamp: Date.now()
-        })
-        ElMessage.success('提交成功')
-        router.push('/')
+        // 由于图片已经单独上传，这里只需要提示成功并跳转
+        ElMessage.success('路况信息提交成功');
+        
+        // 刷新store中的数据，确保首页能显示最新数据
+        await Promise.all([
+          store.dispatch('getNearbyTrafficInfo'),
+          store.dispatch('getPendingVerifications')
+        ]);
+        
+        // 跳转到首页
+        router.push('/');
       } catch (error) {
-        ElMessage.error('提交失败')
+        console.error('提交失败:', error);
+        ElMessage.error('提交失败: ' + error.message);
       }
+    } else {
+      ElMessage.error('请填写所有必填字段');
     }
-  })
+  });
 }
 
 const resetForm = () => {

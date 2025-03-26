@@ -150,7 +150,7 @@ class TrafficContract extends Contract {
     }
     
     // 提交路况信息
-    async SubmitTrafficInfo(ctx, trafficId, userId, trafficType, location, description, timestamp, imageHash) {
+    async SubmitTrafficInfo(ctx, trafficId, userId, trafficType, location, description, timestamp, imageHash, detailHash) {
         console.info('============ 提交路况信息 ============');
         
         // 检查用户是否存在
@@ -168,7 +168,8 @@ class TrafficContract extends Contract {
             location,
             description,
             timestamp,
-            imageHash,
+            imageHash,    // IPFS中图片的哈希值
+            detailHash,  // IPFS中详细数据的哈希值
             status: 'pending',  // 初始状态为待确认
             verifications: 0,   // 初始确认次数为0
             verifiedBy: [],     // 已确认的用户列表
@@ -408,4 +409,4 @@ class TrafficContract extends Contract {
     }
 }
 
-module.exports = TrafficContract; 
+module.exports = TrafficContract;

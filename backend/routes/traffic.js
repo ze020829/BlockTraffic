@@ -1,563 +1,579 @@
 import express from 'express'
 import FabricUtils from '../utils/fabric-utils.js'
+import IPFSUtils from '../utils/ipfs-utils.js'
 import path from 'path'
+import fs from 'fs'
 import { Wallets } from 'fabric-network'
+import { fileURLToPath } from 'url'
+import multer from 'multer'
+
+// 在 ES 模块中定义 __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const router = express.Router()
+
+// 设置路由前缀
+router.prefix = '/traffic'
+
+// 配置文件上传
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+        fileSize: 5 * 1024 * 1024, // 5MB
+    },
+});
+
+// 获取模拟数据
+function getMockData() {
+    try {
+        const mockDataPath = path.join(__dirname, '..', 'data', 'traffic.json');
+        if (fs.existsSync(mockDataPath)) {
+            const data = JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
+            return data;
+        }
+        // 如果文件不存在，返回空数据结构
+        console.log('找不到路况数据文件，返回空的路况数据结构');
+        return { verified: [], pending: [] };
+    } catch (error) {
+        console.error('获取数据失败:', error);
+        return { verified: [], pending: [] };
+    }
+}
+
+// 保存模拟数据
+function saveMockData(data) {
+    try {
+        const mockDataPath = path.join(__dirname, '..', 'data', 'traffic.json');
+        const dataDir = path.dirname(mockDataPath);
+        if (!fs.existsSync(dataDir)) {
+            fs.mkdirSync(dataDir, { recursive: true });
+        }
+        fs.writeFileSync(mockDataPath, JSON.stringify(data, null, 2));
+        return true;
+    } catch (error) {
+        console.error('保存数据失败:', error);
+        return false;
+    }
+}
+
+// 初始化数据
+let mockTrafficData = getMockData();
 
 // 初始化Fabric工具类
 let initialized = false
 async function initializeFabric() {
     if (!initialized) {
         try {
-            await FabricUtils.initialize()
+            await FabricUtils.retryInitialize()
             initialized = true
             console.log('Fabric工具类初始化成功')
+            return true
         } catch (error) {
             console.error('Fabric工具类初始化失败:', error)
-            throw error
+            // 不抛出错误，避免影响其他功能
+            return false
         }
     }
+    return initialized
 }
 
-// 模拟存储空间
-const mockTrafficData = {
-    pending: [],  // 待确认的路况
-    verified: []  // 已确认的路况
-}
-
-// 生成模拟的交通数据
-function generateMockTrafficData() {
-    const types = ['congestion', 'construction', 'accident', 'normal']
-    const descriptions = [
-        '道路拥堵，车辆缓慢行驶',
-        '前方正在进行道路施工，请绕行',
-        '发生交通事故，请谨慎驾驶',
-        '道路畅通，可以正常行驶',
-        '临时交通管制，请按指示行驶',
-        '前方发生车辆故障，占用一条车道',
-        '道路积水，请减速慢行',
-        '道路结冰，请注意安全'
-    ]
-    
-    const locations = [
-        {
-            name: '成都市武侯区天府大道',
-            position: { lng: 104.0668, lat: 30.5728 }
-        },
-        {
-            name: '成都市锦江区春熙路',
-            position: { lng: 104.0817, lat: 30.6571 }
-        },
-        {
-            name: '成都市青羊区人民中路',
-            position: { lng: 104.0638, lat: 30.6726 }
-        },
-        {
-            name: '成都市高新区天府软件园',
-            position: { lng: 104.0668, lat: 30.5369 }
-        },
-        {
-            name: '成都市双流区双流国际机场',
-            position: { lng: 103.9474, lat: 30.5784 }
-        }
-    ]
-    
-    // 生成已验证的交通信息
-    for (let i = 0; i < 5; i++) {
-        const type = types[Math.floor(Math.random() * types.length)]
-        const description = descriptions[Math.floor(Math.random() * descriptions.length)]
-        const locationData = locations[Math.floor(Math.random() * locations.length)]
-        const now = Date.now()
-        const timestamp = now - Math.floor(Math.random() * 7 * 24 * 60 * 60 * 1000) // 过去7天内
-        
-        mockTrafficData.verified.push({
-            id: `traffic_${i}`,
-            type,
-            description,
-            location: locationData.name,
-            position: locationData.position,
-            timestamp,
-            status: 'verified',
-            verifications: 5,
-            verifiedBy: ['user1', 'user2', 'user3', 'user4', 'user5'].slice(0, 5),
-            images: [
-                {
-                name: 'image1.jpg',
-                url: 'https://picsum.photos/300/200?random=' + i
-                }
-            ]
-        })
-    }
-    
-    // 生成待验证的交通信息
-    for (let i = 0; i < 5; i++) {
-        const type = types[Math.floor(Math.random() * types.length)]
-        const description = descriptions[Math.floor(Math.random() * descriptions.length)]
-        const locationData = locations[Math.floor(Math.random() * locations.length)]
-        const now = Date.now()
-        const timestamp = now - Math.floor(Math.random() * 3 * 24 * 60 * 60 * 1000) // 过去3天内
-        const verifications = Math.floor(Math.random() * 4) + 1 // 1-4次验证
-        
-        // 随机选择已验证的用户
-        const verifiedUsers = []
-        const allUsers = ['user1', 'user2', 'user3', 'user4', 'user5']
-        for (let j = 0; j < verifications; j++) {
-            const randomIndex = Math.floor(Math.random() * allUsers.length)
-            verifiedUsers.push(allUsers[randomIndex])
-            allUsers.splice(randomIndex, 1)
-        }
-        
-        mockTrafficData.pending.push({
-            id: `pending_${i}`,
-            type,
-            description,
-            location: locationData.name,
-            position: locationData.position,
-            timestamp,
-            status: 'pending',
-            verifications,
-            verifiedBy: verifiedUsers,
-            images: [
-                {
-                    name: 'image1.jpg',
-                    url: 'https://picsum.photos/300/200?random=' + (i + 10)
-                }
-            ]
-        })
-    }
-}
-
-// 初始化模拟数据
-generateMockTrafficData()
-
-// 获取附近的交通信息
-router.get('/nearby', async (req, res) => {
-    try {
-        // 从区块链获取已确认的路况信息
-        await initializeFabric()
-        
-        try {
-            const contract = await FabricUtils.getContract()
-            
-            // 调用链码获取已确认的路况信息
-            const result = await contract.evaluateTransaction('GetVerifiedTrafficInfo')
-            const trafficInfo = JSON.parse(result.toString())
-            
-            // 将区块链数据转换为前端格式
-            const formattedTraffic = trafficInfo.map(item => ({
-                id: item.trafficId,
-                type: item.trafficType,
-                description: item.description,
-                location: item.location,
-                position: item.position || { lng: 104.0668, lat: 30.5728 }, // 默认位置
-                timestamp: new Date(item.timestamp || item.createdAt).getTime(),
-                status: item.status,
-                verifications: item.verifications,
-                verifiedBy: item.verifiedBy || [],
-                images: item.imageHash ? [
-                    {
-                        name: 'image.jpg',
-                        url: `https://ipfs.io/ipfs/${item.imageHash}`
-                    }
-                ] : [
-                    {
-                        name: 'image.jpg',
-                        url: 'https://picsum.photos/300/200?random=' + Math.floor(Math.random() * 100)
-                    }
-                ]
-            }))
-            
-            res.json(formattedTraffic)
-        } catch (error) {
-            console.error('从区块链获取路况信息失败:', error)
-            // 如果区块链获取失败，使用模拟数据
-            res.json(mockTrafficData.verified)
-        }
-    } catch (error) {
-        console.error('获取附近路况信息失败:', error)
-        res.status(500).json({ error: error.message })
-    }
-})
+// 首页路由
+router.get('/', async (req, res) => {
+    const trafficDb = getMockData();
+    return res.json({
+        verified: trafficDb.verified,
+        pending: trafficDb.pending
+    });
+});
 
 // 获取待确认的交通信息
 router.get('/pending', async (req, res) => {
     try {
-        // 从区块链获取待确认的路况信息
-        await initializeFabric()
+        // 从本地缓存获取数据
+        const trafficData = getMockData();
         
-        try {
-            const contract = await FabricUtils.getContract()
-            
-            // 调用链码获取待确认的路况信息
-            const result = await contract.evaluateTransaction('GetPendingTrafficInfo')
-            const trafficInfo = JSON.parse(result.toString())
-            
-            // 将区块链数据转换为前端格式
-            const formattedTraffic = trafficInfo.map(item => ({
-                id: item.trafficId,
-                type: item.trafficType,
-                description: item.description,
-                location: item.location,
-                position: item.position || { lng: 104.0668, lat: 30.5728 }, // 默认位置
-                timestamp: new Date(item.timestamp || item.createdAt).getTime(),
-                status: item.status,
-                verifications: item.verifications,
-                verifiedBy: item.verifiedBy || [],
-                images: item.imageHash ? [
-                    {
-                        name: 'image.jpg',
-                        url: `https://ipfs.io/ipfs/${item.imageHash}`
-                    }
-                ] : [
-                    {
-                        name: 'image.jpg',
-                        url: 'https://picsum.photos/300/200?random=' + Math.floor(Math.random() * 100)
-                    }
-                ]
-            }))
-            
-            res.json(formattedTraffic)
-        } catch (error) {
-            console.error('从区块链获取待确认路况信息失败:', error)
-            // 如果区块链获取失败，使用模拟数据
-            res.json(mockTrafficData.pending)
-        }
+        // 返回所有待验证的路况信息
+        res.json({
+            success: true, 
+            data: trafficData.pending,
+            message: '获取待确认路况信息成功'
+        });
     } catch (error) {
-        console.error('获取待确认路况信息失败:', error)
-        res.status(500).json({ error: error.message })
+        console.error('获取待确认路况信息失败:', error);
+        res.status(500).json({ 
+            error: '获取待确认路况信息失败', 
+            message: error.message,
+            success: false
+        });
     }
-})
+});
 
-// 提交新的交通信息
-router.post('/submit', async (req, res) => {
+// 获取附近的路况信息
+router.get('/nearby', async (req, res) => {
+    const { lat, lng, radius = 10 } = req.query;
+    
+    if (!lat || !lng) {
+        return res.status(400).json({ success: false, error: '缺少位置参数' });
+    }
+    
     try {
-        const { userId, type, description, location, position, image } = req.body
+        const userPosition = { lat: parseFloat(lat), lng: parseFloat(lng) };
+        const trafficDb = getMockData();
         
-        if (!userId || !type || !description || !location) {
-            return res.status(400).json({ error: '缺少必要参数' })
-        }
+        // 简单的距离过滤，未来可以使用更复杂的地理位置查询
+        const nearbyTraffic = [...trafficDb.verified, ...trafficDb.pending].filter(item => {
+            if (!item.position) return false;
+            
+            // 简单的距离计算，未来可以改进
+            const distance = Math.sqrt(
+                Math.pow(userPosition.lat - item.position.lat, 2) + 
+                Math.pow(userPosition.lng - item.position.lng, 2)
+            ) * 111; // 粗略的公里换算
+            
+            return distance <= radius;
+        });
         
-        // 生成唯一ID
-        const trafficId = `traffic_${Date.now()}_${Math.floor(Math.random() * 1000)}`
-        
-        // 将路况信息提交到区块链
-        await initializeFabric()
-        
-        try {
-            const contract = await FabricUtils.getContract()
-            
-            // 检查用户身份
-            const walletPath = path.join(process.cwd(), 'wallet')
-            const wallet = await Wallets.newFileSystemWallet(walletPath)
-            const identity = await wallet.get(userId)
-            
-            if (!identity) {
-                throw new Error(`用户 ${userId} 没有有效的区块链身份`)
-            }
-            
-            // 调用链码提交路况信息
-            const imageHash = image ? 'QmExample123456789' : '' // 实际应用中应使用IPFS上传并获取哈希
-            const timestamp = Date.now()
-            
-            const result = await contract.submitTransaction(
-                'SubmitTrafficInfo',
-                trafficId,
-                userId,
-                type,
-                location,
-                description,
-                timestamp.toString(),
-                imageHash
-            )
-            
-            const trafficInfo = JSON.parse(result.toString())
-            
-            // 将区块链数据转换为前端格式
-            const formattedTraffic = {
-                id: trafficInfo.trafficId,
-                type: trafficInfo.trafficType,
-                description: trafficInfo.description,
-                location: trafficInfo.location,
-                position: position || { lng: 104.0668, lat: 30.5728 },
-                timestamp: timestamp,
-                status: trafficInfo.status,
-                verifications: trafficInfo.verifications,
-                verifiedBy: trafficInfo.verifiedBy || [],
-                images: imageHash ? [
-                    {
-                        name: 'image.jpg',
-                        url: `https://ipfs.io/ipfs/${imageHash}`
-                    }
-                ] : []
-            }
-            
-            // 添加到本地缓存
-            mockTrafficData.pending.push(formattedTraffic)
-            
-            res.status(201).json({
-                message: '路况信息提交成功',
-                trafficInfo: formattedTraffic,
-                blockchainSync: true
-            })
-        } catch (error) {
-            console.error('提交路况信息到区块链失败:', error)
-            
-            // 如果区块链提交失败，仍创建本地记录
-            const newTraffic = {
-                id: trafficId,
-                type,
-                description,
-                location,
-                position: position || { lng: 104.0668, lat: 30.5728 },
-                timestamp: Date.now(),
-                status: 'pending',
-                verifications: 0,
-                verifiedBy: [],
-                images: image ? [
-                    {
-                        name: 'image.jpg',
-                        url: image
-                    }
-                ] : []
-            }
-            
-            // 添加到本地缓存
-            mockTrafficData.pending.push(newTraffic)
-            
-            res.json({
-                message: '路况信息已本地保存，但未能同步到区块链',
-                trafficInfo: newTraffic,
-                blockchainSync: false,
-                blockchainError: error.message
-            })
-        }
+        return res.json({
+            success: true,
+            data: nearbyTraffic
+        });
     } catch (error) {
-        console.error('提交路况信息失败:', error)
-        res.status(500).json({ error: error.message })
+        console.error('获取附近路况信息失败:', error);
+        return res.status(500).json({ success: false, error: error.message });
     }
-})
+});
 
-// 确认路况信息
+// 验证路况信息
 router.post('/verify', async (req, res) => {
+    console.log('收到验证路况信息请求:', req.body);
+    const { hash, userId, verified = true } = req.body;
+    
+    if (!hash || !userId) {
+        console.log('验证请求缺少必要参数:', { hash, userId });
+        return res.status(400).json({ success: false, error: '缺少必要参数' });
+    }
+    
     try {
-        const { trafficId, userId } = req.body
+        // 从本地数据中查找
+        const trafficDb = getMockData();
+        const pendingIndex = trafficDb.pending.findIndex(item => item.hash === hash);
         
-        if (!trafficId || !userId) {
-            return res.status(400).json({ error: '缺少必要参数' })
+        if (pendingIndex === -1) {
+            console.log(`未找到hash为${hash}的待验证路况信息`);
+            return res.status(404).json({ success: false, error: '未找到待验证的路况信息' });
         }
         
-        // 将确认信息提交到区块链
-        await initializeFabric()
+        const trafficInfo = trafficDb.pending[pendingIndex];
+        console.log('找到待验证路况信息:', { id: trafficInfo.id, hash: trafficInfo.hash });
         
-        try {
-            const contract = await FabricUtils.getContract()
-            
-            // 检查用户身份
-            const walletPath = path.join(process.cwd(), 'wallet')
-            const wallet = await Wallets.newFileSystemWallet(walletPath)
-            const identity = await wallet.get(userId)
-            
-            if (!identity) {
-                throw new Error(`用户 ${userId} 没有有效的区块链身份`)
+        // 模拟用户奖励逻辑（不再尝试区块链记录）
+        console.log(`用户 ${userId} 验证了路况信息 ${hash}, 验证结果: ${verified}`);
+        
+        if (verified) {
+            // 初始化或更新验证用户列表
+            if (!trafficInfo.verifiedBy) {
+                trafficInfo.verifiedBy = [];
             }
             
-            // 调用链码确认路况信息
-            const result = await contract.submitTransaction(
-                'VerifyTrafficInfo',
-                trafficId,
-                userId
-            )
-            
-            const trafficInfo = JSON.parse(result.toString())
-            
-            // 将区块链数据转换为前端格式
-            const formattedTraffic = {
-                id: trafficInfo.trafficId,
-                type: trafficInfo.trafficType,
-                description: trafficInfo.description,
-                location: trafficInfo.location,
-                timestamp: new Date(trafficInfo.timestamp || trafficInfo.createdAt).getTime(),
-                status: trafficInfo.status,
-                verifications: trafficInfo.verifications,
-                verifiedBy: trafficInfo.verifiedBy || []
+            // 检查用户是否已经验证过
+            if (trafficInfo.verifiedBy.includes(userId)) {
+                console.log(`用户 ${userId} 已经验证过路况信息 ${hash}`);
+                return res.json({
+                    success: true,
+                    message: '您已经验证过该路况信息',
+                    data: {
+                        hash,
+                        verifiedBy: trafficInfo.verifiedBy,
+                        verificationCount: trafficInfo.verifiedBy.length
+                    }
+                });
             }
             
-            // 更新本地缓存
-            const pendingIndex = mockTrafficData.pending.findIndex(item => item.id === trafficId)
+            // 添加到验证用户列表
+            trafficInfo.verifiedBy.push(userId);
+            console.log(`路况信息 ${hash} 当前验证人数: ${trafficInfo.verifiedBy.length}`);
             
-            if (pendingIndex !== -1) {
-                // 如果状态变为已确认，移动到已确认列表
-                if (trafficInfo.status === 'verified') {
-                    const verifiedTraffic = mockTrafficData.pending.splice(pendingIndex, 1)[0]
-                    verifiedTraffic.status = 'verified'
-                    verifiedTraffic.verifications = trafficInfo.verifications
-                    verifiedTraffic.verifiedBy = trafficInfo.verifiedBy
-                    mockTrafficData.verified.push(verifiedTraffic)
-                } else {
-                    // 否则更新待确认列表
-                    mockTrafficData.pending[pendingIndex].verifications = trafficInfo.verifications
-                    mockTrafficData.pending[pendingIndex].verifiedBy = trafficInfo.verifiedBy
-                }
-            }
-            
-            res.json({
-                message: trafficInfo.status === 'verified' ? '路况信息已完成确认' : '路况信息确认成功',
-                trafficInfo: formattedTraffic,
-                reward: {
-                    tokens: trafficInfo.status === 'verified' ? 5 : 2,
-                    reputation: trafficInfo.status === 'verified' ? 2 : 1
-                },
-                blockchainSync: true
-            })
-        } catch (error) {
-            console.error('确认路况信息到区块链失败:', error)
-            
-            // 如果区块链确认失败，仍更新本地记录
-            const pendingIndex = mockTrafficData.pending.findIndex(item => item.id === trafficId)
-            
-            if (pendingIndex === -1) {
-                return res.status(404).json({ error: '未找到待确认的路况信息' })
-            }
-            
-            // 检查用户是否已确认
-            if (mockTrafficData.pending[pendingIndex].verifiedBy.includes(userId)) {
-                return res.status(400).json({ error: '您已经确认过此路况信息' })
-            }
-            
-            // 更新本地确认信息
-            mockTrafficData.pending[pendingIndex].verifications += 1
-            mockTrafficData.pending[pendingIndex].verifiedBy.push(userId)
-            
-            // 如果确认次数达到5，移动到已确认列表
-            if (mockTrafficData.pending[pendingIndex].verifications >= 5) {
-                const verifiedTraffic = mockTrafficData.pending.splice(pendingIndex, 1)[0]
-                verifiedTraffic.status = 'verified'
-                mockTrafficData.verified.push(verifiedTraffic)
+            // 验证人数达到5人，移至已验证列表
+            if (trafficInfo.verifiedBy.length >= 5) {
+                console.log(`路况信息 ${hash} 已达到5人验证，移至已验证列表`);
+                // 从pending移除
+                trafficDb.pending.splice(pendingIndex, 1);
                 
-                res.json({
-                    message: '路况信息已完成确认（仅本地记录）',
-                    trafficInfo: verifiedTraffic,
-                    reward: {
-                        tokens: 5,
-                        reputation: 2
-                    },
-                    blockchainSync: false,
-                    blockchainError: error.message
-                })
+                // 添加到verified列表
+                trafficDb.verified.push({
+                    ...trafficInfo,
+                    status: 'verified',
+                    verifiedAt: Date.now()
+                });
+                
+                saveMockData(trafficDb);
+                console.log(`路况信息 ${hash} 已成功验证并移至已验证列表`);
+                
+                return res.json({
+                    success: true,
+                    message: '路况信息已成功验证，感谢您的参与',
+                    data: {
+                        hash,
+                        verifiedBy: trafficInfo.verifiedBy,
+                        verificationCount: trafficInfo.verifiedBy.length,
+                        verified: true,
+                        verifiedAt: Date.now(),
+                        reward: {
+                            tokens: 2,
+                            reputation: 1
+                        }
+                    }
+                });
             } else {
-                res.json({
-                    message: '路况信息确认成功（仅本地记录）',
-                    trafficInfo: mockTrafficData.pending[pendingIndex],
-                    reward: {
-                        tokens: 2,
-                        reputation: 1
-                    },
-                    blockchainSync: false,
-                    blockchainError: error.message
-                })
+                // 未达到5人验证，更新pending列表中的记录
+                trafficDb.pending[pendingIndex] = trafficInfo;
+                saveMockData(trafficDb);
+                console.log(`路况信息 ${hash} 已收到用户 ${userId} 的验证，当前验证人数: ${trafficInfo.verifiedBy.length}`);
+                
+                return res.json({
+                    success: true,
+                    message: `感谢您的验证，当前已有 ${trafficInfo.verifiedBy.length} 人验证，需要5人验证才能最终确认`,
+                    data: {
+                        hash,
+                        verifiedBy: trafficInfo.verifiedBy,
+                        verificationCount: trafficInfo.verifiedBy.length,
+                        reward: {
+                            tokens: 1,
+                            reputation: 0.5
+                        }
+                    }
+                });
             }
+        } else {
+            // 用户否决该路况信息
+            // 仅从pending移除，不添加到verified
+            trafficDb.pending.splice(pendingIndex, 1);
+            saveMockData(trafficDb);
+            console.log(`路况信息 ${hash} 被用户 ${userId} 否决并从待验证列表移除`);
+            
+            return res.json({
+                success: true,
+                message: '路况信息已被否决',
+                data: { hash }
+            });
         }
     } catch (error) {
-        console.error('确认路况信息失败:', error)
-        res.status(500).json({ error: error.message })
+        console.error('验证路况信息失败:', error);
+        return res.status(500).json({ success: false, error: error.message });
     }
-})
+});
+
+// 创建测试路由
+router.post('/test', async (req, res) => {
+    const { userId } = req.body;
+    
+    if (!userId) {
+        return res.status(400).json({ success: false, error: '缺少用户ID' });
+    }
+    
+    try {
+        // 创建测试数据
+        const testData = {
+            userId,
+            type: 'test',
+            description: '这是一条测试数据',
+            location: '测试位置',
+            position: { lat: 30.5728, lng: 104.0668 },
+            timestamp: Date.now()
+        };
+        
+        // 上传到IPFS
+        const result = await IPFSUtils.uploadJSON(testData);
+        
+        if (!result.success) {
+            return res.status(500).json({ success: false, error: `上传到IPFS失败: ${result.error}` });
+        }
+        
+        // 保存到本地数据
+        const trafficDb = getMockData();
+        trafficDb.pending.push({
+            hash: result.hash,
+            userId,
+            type: 'test',
+            location: '测试位置',
+            position: { lat: 30.5728, lng: 104.0668 },
+            timestamp: Date.now()
+        });
+        saveMockData(trafficDb);
+        
+        return res.json({
+            success: true,
+            message: '测试数据已保存到IPFS',
+            data: {
+                hash: result.hash,
+                url: `/api/traffic/${result.hash}`
+            }
+        });
+    } catch (error) {
+        console.error('创建测试数据失败:', error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 上传路况信息
+router.post('/upload', upload.single('image'), async (req, res) => {
+    console.log('收到交通信息上传请求');
+    console.log('文件:', req.file ? '已上传图片' : '无图片');
+    console.log('请求体:', req.body);
+    
+    // 检查必要参数
+    const { location, type, userId } = req.body;
+    if (!location || !type || !userId) {
+        console.log('缺少必要参数:', { location, type, userId });
+        return res.status(400).json({ success: false, error: '缺少必要参数' });
+    }
+    
+    // 处理position参数，支持字符串和对象格式
+    let position = req.body.position;
+    if (position && typeof position === 'string') {
+        try {
+            position = JSON.parse(position);
+        } catch (e) {
+            console.log('position参数解析失败:', position);
+        }
+    }
+    
+    // 准备要上传的数据
+    const trafficData = {
+        userId,
+        type,
+        description: req.body.description || '',
+        location,
+        position,
+        timestamp: Date.now()
+    };
+    
+    // 如果有图片文件，添加到数据中
+    if (req.file) {
+        console.log(`添加图片数据，大小: ${req.file.size} 字节`);
+        trafficData.image = req.file.buffer;
+    }
+    
+    console.log('准备上传到IPFS的数据:', { ...trafficData, image: trafficData.image ? '图片数据...' : undefined });
+    
+    try {
+        // 上传到IPFS
+        const ipfsResult = await IPFSUtils.uploadTrafficInfo(trafficData);
+        
+        if (!ipfsResult.success) {
+            console.log('IPFS上传失败:', ipfsResult.error);
+            return res.status(500).json({ success: false, error: `IPFS上传失败: ${ipfsResult.error}` });
+        }
+        
+        console.log('IPFS上传成功:', { hash: ipfsResult.hash, imageHash: ipfsResult.imageHash });
+        
+        // 保存到本地数据 (可选，用于缓存和快速访问)
+        const localData = {
+            id: ipfsResult.hash, // 添加id字段，使用hash作为id
+            hash: ipfsResult.hash,
+            userId,
+            type,
+            location,
+            position,
+            timestamp: Date.now(),
+            imageHash: ipfsResult.imageHash
+        };
+        
+        // 保存到本地数据存储
+        const trafficDb = getMockData();
+        trafficDb.pending.push(localData);
+        saveMockData(trafficDb);
+        console.log(`路况信息已保存到本地数据, id/hash: ${localData.hash}`);
+        
+        // 返回成功响应
+        return res.json({
+            success: true,
+            message: '交通信息已成功保存到IPFS',
+            data: {
+                id: ipfsResult.hash, // 添加id字段
+                hash: ipfsResult.hash,
+                url: `/api/traffic/${ipfsResult.hash}`
+            }
+        });
+    } catch (error) {
+        console.error('处理上传时发生错误:', error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 获取用户路况信息历史
+router.get('/user/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                error: '缺少用户ID'
+            });
+        }
+        
+        // 从本地数据获取用户路况信息
+        const trafficDb = getMockData();
+        const userTraffic = [
+            ...trafficDb.pending.filter(item => item.userId === userId),
+            ...trafficDb.verified.filter(item => item.userId === userId)
+        ];
+        
+        if (userTraffic.length === 0) {
+            return res.json({
+                success: true,
+                data: [],
+                message: '未找到用户提交的路况信息'
+            });
+        }
+        
+        return res.json({
+            success: true,
+            data: userTraffic
+        });
+    } catch (error) {
+        console.error('获取用户路况信息历史失败:', error);
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
 
 // 管理员直接确认路况信息
 router.post('/admin-verify', async (req, res) => {
+    console.log('收到管理员确认路况信息请求:', req.body);
     try {
-        const { trafficId, adminId } = req.body
+        const { hash, adminId } = req.body;
         
-        if (!trafficId || !adminId) {
-            return res.status(400).json({ error: '缺少必要参数' })
+        if (!hash || !adminId) {
+            console.log('管理员确认请求缺少必要参数:', { hash, adminId });
+            return res.status(400).json({ success: false, error: '缺少必要参数' });
         }
         
         // 确认管理员身份
         if (adminId !== 'admin') {
-            return res.status(403).json({ error: '只有管理员可以执行此操作' })
+            console.log(`用户 ${adminId} 尝试进行管理员操作但不是管理员`);
+            return res.status(403).json({ success: false, error: '只有管理员可以执行此操作' });
         }
         
-        // 将确认信息提交到区块链
-        await initializeFabric()
+        // 从本地数据中查找
+        const trafficDb = getMockData();
+        const pendingIndex = trafficDb.pending.findIndex(item => item.hash === hash);
         
-        try {
-            const contract = await FabricUtils.getContract()
-            
-            // 检查管理员身份
-            const walletPath = path.join(process.cwd(), 'wallet')
-            const wallet = await Wallets.newFileSystemWallet(walletPath)
-            const identity = await wallet.get(adminId)
-            
-            if (!identity) {
-                throw new Error(`管理员 ${adminId} 没有有效的区块链身份`)
-            }
-            
-            // 调用链码确认路况信息
-            const result = await contract.submitTransaction(
-                'AdminVerifyTrafficInfo',
-                trafficId,
-                adminId
-            )
-            
-            const trafficInfo = JSON.parse(result.toString())
-            
-            // 将区块链数据转换为前端格式
-            const formattedTraffic = {
-                id: trafficInfo.trafficId,
-                type: trafficInfo.trafficType,
-                description: trafficInfo.description,
-                location: trafficInfo.location,
-                timestamp: new Date(trafficInfo.timestamp || trafficInfo.createdAt).getTime(),
-                status: trafficInfo.status,
-                verifications: trafficInfo.verifications,
-                verifiedBy: trafficInfo.verifiedBy || []
-            }
-            
-            // 更新本地缓存
-            const pendingIndex = mockTrafficData.pending.findIndex(item => item.id === trafficId)
-            
-            if (pendingIndex !== -1) {
-                const verifiedTraffic = mockTrafficData.pending.splice(pendingIndex, 1)[0]
-                verifiedTraffic.status = 'verified'
-                verifiedTraffic.verifications = 5 // 设置为满足条件
-                verifiedTraffic.verifiedBy.push(adminId)
-                mockTrafficData.verified.push(verifiedTraffic)
-            }
-            
-            res.json({
-                message: '管理员已直接确认路况信息',
-                trafficInfo: formattedTraffic,
-                blockchainSync: true
-            })
-        } catch (error) {
-            console.error('管理员确认路况信息到区块链失败:', error)
-            
-            // 如果区块链确认失败，仍更新本地记录
-            const pendingIndex = mockTrafficData.pending.findIndex(item => item.id === trafficId)
-            
-            if (pendingIndex === -1) {
-                return res.status(404).json({ error: '未找到待确认的路况信息' })
-            }
-            
-            // 更新本地确认信息
-            const verifiedTraffic = mockTrafficData.pending.splice(pendingIndex, 1)[0]
-            verifiedTraffic.status = 'verified'
-            verifiedTraffic.verifications = 5 // 设置为满足条件
-            verifiedTraffic.verifiedBy.push(adminId)
-            mockTrafficData.verified.push(verifiedTraffic)
-            
-            res.json({
-                message: '管理员已直接确认路况信息（仅本地记录）',
-                trafficInfo: verifiedTraffic,
-                blockchainSync: false,
-                blockchainError: error.message
-            })
+        if (pendingIndex === -1) {
+            console.log(`未找到hash为${hash}的待验证路况信息`);
+            return res.status(404).json({ success: false, error: '未找到待验证的路况信息' });
         }
+        
+        const trafficInfo = trafficDb.pending[pendingIndex];
+        console.log('找到待验证路况信息:', { id: trafficInfo.id, hash: trafficInfo.hash });
+        
+        // 初始化verifiedBy数组（如果不存在）
+        if (!trafficInfo.verifiedBy) {
+            trafficInfo.verifiedBy = [];
+        }
+        
+        // 确保管理员ID在verifiedBy列表中
+        if (!trafficInfo.verifiedBy.includes(adminId)) {
+            trafficInfo.verifiedBy.push(adminId);
+        }
+        
+        // 从pending移到verified
+        trafficDb.pending.splice(pendingIndex, 1);
+        trafficDb.verified.push({
+            ...trafficInfo,
+            status: 'verified',
+            verifiedBy: trafficInfo.verifiedBy,
+            verifiedAt: Date.now(),
+            adminVerified: true
+        });
+        
+        // 保存更新的数据
+        saveMockData(trafficDb);
+        console.log(`路况信息 ${hash} 被管理员 ${adminId} 直接确认并移至已验证列表`);
+        
+        return res.json({
+            success: true,
+            message: '管理员已直接确认路况信息',
+            data: {
+                hash,
+                verifiedBy: trafficInfo.verifiedBy,
+                verificationCount: trafficInfo.verifiedBy.length,
+                verifiedAt: Date.now(),
+                adminVerified: true
+            }
+        });
     } catch (error) {
-        console.error('管理员确认路况信息失败:', error)
-        res.status(500).json({ error: error.message })
+        console.error('管理员确认路况信息失败:', error);
+        return res.status(500).json({ 
+            success: false,
+            error: error.message
+        });
     }
-})
+});
+
+// 获取指定哈希的路况信息 - 必须放在最后，否则会拦截其他路由
+router.get('/:hash', async (req, res) => {
+    const { hash } = req.params;
+    
+    if (!hash) {
+        return res.status(400).json({ success: false, error: '缺少哈希参数' });
+    }
+    
+    try {
+        // 从IPFS获取数据
+        const result = await IPFSUtils.getTrafficInfo(hash);
+        
+        if (!result.success) {
+            return res.status(404).json({ success: false, error: `未找到指定的路况信息: ${result.error}` });
+        }
+        
+        // 不返回图片数据，而是提供URL
+        const { imageData, ...trafficInfo } = result.data;
+        
+        return res.json({
+            success: true,
+            data: {
+                ...trafficInfo,
+                imageUrl: imageData ? `/api/traffic/${hash}/image` : null
+            }
+        });
+    } catch (error) {
+        console.error('获取路况信息失败:', error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 获取指定哈希的路况图片
+router.get('/:hash/image', async (req, res) => {
+    const { hash } = req.params;
+    
+    if (!hash) {
+        return res.status(400).json({ success: false, error: '缺少哈希参数' });
+    }
+    
+    try {
+        // 从IPFS获取完整数据
+        const result = await IPFSUtils.getTrafficInfo(hash);
+        
+        if (!result.success || !result.data.imageData) {
+            return res.status(404).json({ success: false, error: '未找到指定的图片' });
+        }
+        
+        // 设置正确的内容类型并返回图片
+        res.setHeader('Content-Type', 'image/jpeg');
+        return res.send(result.data.imageData);
+    } catch (error) {
+        console.error('获取路况图片失败:', error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+});
 
 export default router
+
+// 重要说明：路由顺序非常关键
+// 具体路由 (如 '/verify', '/pending') 必须在通配符路由 (如 '/:hash') 之前定义
+// 否则，通配符路由会捕获所有请求，导致具体路由无法访问
