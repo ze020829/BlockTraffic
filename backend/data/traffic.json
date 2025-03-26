@@ -1,0 +1,123 @@
+{
+  "verified": [
+    {
+      "hash": "QmUPXsrfLMV4t1jbSYneHvx19ULVjD2wvdtenwfXFe4RJz",
+      "userId": "test-user",
+      "type": "test",
+      "location": "测试位置",
+      "position": {
+        "lat": 30.5728,
+        "lng": 104.0668
+      },
+      "timestamp": 1742987006842,
+      "verifiedBy": [
+        "user2"
+      ],
+      "verifiedAt": 1742987828293,
+      "status": "verified"
+    },
+    {
+      "hash": "QmXswJL3fG8jTc3yPcay1BM18exu6rq7uWGGUYE7HtCPfa",
+      "userId": "user1",
+      "type": "congestion",
+      "location": "四川省成都市双流区长江路3段-23号",
+      "position": {
+        "lng": 103.99582816864269,
+        "lat": 30.58495213218148
+      },
+      "timestamp": 1742987457229,
+      "imageHash": "QmPRTGGSAcMFoTvy3548WmMDEPinmmaSwGq1EYGpfMPVeC",
+      "verifiedBy": [
+        "user1"
+      ],
+      "verifiedAt": 1742987837520,
+      "status": "verified"
+    },
+    {
+      "id": "QmNigkEmEwAmh9gMDEPm6gqiBNNvA8gShsvTVSn7fsAGuU",
+      "hash": "QmNigkEmEwAmh9gMDEPm6gqiBNNvA8gShsvTVSn7fsAGuU",
+      "userId": "user1",
+      "type": "congestion",
+      "location": "四川省成都市双流区学府西路",
+      "position": {
+        "lng": 103.98407,
+        "lat": 30.581512
+      },
+      "timestamp": 1742988630774,
+      "imageHash": "QmazuMTCTLqgQNUteTgQsacb7KDyuxXjRdwfsQVuHTw5Ab",
+      "verifiedBy": [
+        "user1",
+        "user2",
+        "user3",
+        "user4",
+        "user5"
+      ],
+      "description": "四川省成都市双流区学府西路拥堵情况",
+      "status": "verified",
+      "verifiedAt": 1742989579228
+    },
+    {
+      "id": "QmekKyGaDbUGamDt3jPiHgQ2U8FJVhtXNi9JPKFRjB8kAh",
+      "hash": "QmekKyGaDbUGamDt3jPiHgQ2U8FJVhtXNi9JPKFRjB8kAh",
+      "userId": "admin",
+      "type": "construction",
+      "location": "四川省成都市武侯区凉港大道363号",
+      "position": {
+        "lng": 103.98886517322526,
+        "lat": 30.588498199227676
+      },
+      "timestamp": 1742989674460,
+      "imageHash": "QmTkEbd3yq7L46AZqB5xCeQUsZD21ecwV5aj3HKmFcCKwr",
+      "verifiedBy": [
+        "user1",
+        "user2",
+        "user3",
+        "user4",
+        "user5"
+      ],
+      "status": "verified",
+      "verifiedAt": 1742989718000
+    },
+    {
+      "id": "QmQWNPwgjb55zoFSir2SEgcyswDFKm4eyW4EX5qp1goFPx",
+      "hash": "QmQWNPwgjb55zoFSir2SEgcyswDFKm4eyW4EX5qp1goFPx",
+      "userId": "user1",
+      "type": "congestion",
+      "location": "四川省成都市锦江区河滨路",
+      "position": {
+        "lng": 104.0943,
+        "lat": 30.6311
+      },
+      "timestamp": 1743003588741,
+      "imageHash": "QmPRTGGSAcMFoTvy3548WmMDEPinmmaSwGq1EYGpfMPVeC",
+      "verifiedBy": [
+        "user1",
+        "user2",
+        "user3",
+        "user4",
+        "user5"
+      ],
+      "status": "verified",
+      "verifiedAt": 1743003678762
+    }
+  ],
+  "pending": [
+    {
+      "id": "Qma5vvqdZexbJzAdykeXbS9DtY2nGD48JriWC3rRVx39e4",
+      "hash": "Qma5vvqdZexbJzAdykeXbS9DtY2nGD48JriWC3rRVx39e4",
+      "userId": "user1",
+      "type": "accident",
+      "location": "四川省成都市锦江区龙舟路50号-附3",
+      "position": {
+        "lng": 104.10345385143,
+        "lat": 30.634392256856
+      },
+      "timestamp": 1743003391533,
+      "imageHash": "QmdocYPZLhJjoNcePJ2LemeJxrkXkcyFYPnSyhrLmUheqW",
+      "verifiedBy": [
+        "user5",
+        "user4"
+      ]
+    }
+  ]
+}

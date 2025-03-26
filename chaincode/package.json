@@ -1,0 +1,23 @@
+{
+    "name": "blocktraffic",
+    "version": "1.0.0",
+    "description": "BlockTraffic chaincode",
+    "main": "index.js",
+    "engines": {
+        "node": ">=12"
+    },
+    "scripts": {
+        "lint": "eslint .",
+        "pretest": "npm run lint",
+        "test": "jest --coverage"
+    },
+    "dependencies": {
+        "blocktraffic": "file:",
+        "fabric-contract-api": "^2.2.0",
+        "fabric-shim": "^2.2.0"
+    },
+    "devDependencies": {
+        "eslint": "^8.0.0",
+        "jest": "^29.0.0"
+    }
+}

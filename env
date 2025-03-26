@@ -1,0 +1,6 @@
+# Fabric 网络配置
+FABRIC_CA_CLIENT_HOME=/tmp/fabric-ca-client
+FABRIC_CA_SERVER=https://localhost:7054
+FABRIC_CA_ADMIN_ID=admin
+FABRIC_CA_ADMIN_SECRET=adminpw
+ORGANIZATION_MSP_ID=Org1MSP 

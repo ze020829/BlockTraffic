@@ -1,0 +1,62 @@
+{
+  "admin": {
+    "id": "admin",
+    "username": "admin",
+    "password": "adminpw",
+    "role": "admin",
+    "credits": 1000,
+    "reputation": 100,
+    "createdAt": 1740325591063,
+    "lastLogin": 1742744791063
+  },
+  "user1": {
+    "id": "user1",
+    "username": "王静",
+    "password": "password1",
+    "role": "user",
+    "credits": 447,
+    "reputation": 23,
+    "createdAt": 1742485591063,
+    "lastLogin": 1742831191063
+  },
+  "user2": {
+    "id": "user2",
+    "username": "吴伟",
+    "password": "password2",
+    "role": "user",
+    "credits": 202,
+    "reputation": 50,
+    "createdAt": 1742485591063,
+    "lastLogin": 1742744791063
+  },
+  "user3": {
+    "id": "user3",
+    "username": "吴伟",
+    "password": "password3",
+    "role": "user",
+    "credits": 472,
+    "reputation": 37,
+    "createdAt": 1741275991063,
+    "lastLogin": 1742744791063
+  },
+  "user4": {
+    "id": "user4",
+    "username": "赵静",
+    "password": "password4",
+    "role": "user",
+    "credits": 308,
+    "reputation": 27,
+    "createdAt": 1742226391063,
+    "lastLogin": 1742658391063
+  },
+  "user5": {
+    "id": "user5",
+    "username": "黄芳",
+    "password": "password5",
+    "role": "user",
+    "credits": 301,
+    "reputation": 42,
+    "createdAt": 1741621591063,
+    "lastLogin": 1742831191063
+  }
+}
